@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Amadeus Demo</title>
+
+    <!-- 模型切换 loading：必须在所有外部脚本之前就位，覆盖 wasm 就绪 + zip 解压的空窗 -->
+    <script>
+    (function () {
+        var root = document.documentElement, KEY = 'sg-loading-target';
+        var settled = false;   // 本页是否已成功加载过模型（跨导航会重置）
+        function label(text) {
+            var n = document.getElementById('sg-loading-label');
+            if (n) n.textContent = text;
+        }
+        function show(text) {
+            root.classList.remove('sg-ready');
+            root.classList.add('sg-loading-instant');   // 点击瞬间出现，不淡入
+            if (text) label(text);
+        }
+        function hide() {
+            settled = true;
+            root.classList.remove('sg-loading-instant');
+            root.classList.add('sg-ready');
+            try { sessionStorage.removeItem(KEY); } catch (_) {}
+        }
+        var pending = '正在载入未来道具研究所…';
+        try {
+            var target = sessionStorage.getItem(KEY);
+            if (target) pending = '正在再构筑 ' + target + ' 的世界线…';
+        } catch (_) {}
+        document.addEventListener('DOMContentLoaded', function () { label(pending); }, { once: true });
+        // 慢加载提示：wasm + 大 zip 在软渲染下实测要 20–30s，别让人以为卡死。
+        // 绝不自动隐藏遮罩（模型没好时关掉只会露出空白）；
+        // 只有真正超时，才给一个可点击的重载入入口。
+        setTimeout(function () {
+            if (!settled && !root.classList.contains('sg-ready')) label('正在解压模型与构建纹理…');
+        }, 15000);
+        setTimeout(function () {
+            if (settled) return;
+            label('载入超时 · 点击此处重新载入');
+            var n = document.getElementById('sg-loading');
+            if (!n) return;
+            n.style.cursor = 'pointer';
+            n.addEventListener('click', function () { location.reload(); }, { once: true });
+        }, 45000);
+        window.SG_LOADING = {
+            show: show, hide: hide, setLabel: label,
+            isVisible: function () { return !root.classList.contains('sg-ready'); }
+        };
+    })();
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: url('background/background.jpg') center center / cover no-repeat;
+            display: flex; justify-content: center; align-items: center;
+        }
+        #canvas {
+            display: block; cursor: pointer;
+            background: transparent; border: none; outline: none;
+            touch-action: none;
+            position: fixed; top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            object-fit: contain;
+            z-index: 1; pointer-events: auto;
+        }
+
+        /* ---------- 屏幕中央 loading（模型切换 / 首次载入） ---------- */
+        #sg-loading {
+            position: fixed; inset: 0; z-index: 9999;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 20px; text-align: center;
+            background: radial-gradient(circle at 50% 45%, rgba(9,24,29,.74), rgba(4,10,14,.92) 78%);
+            -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+            color: #e6f1ef;
+            font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+            opacity: 1; visibility: visible;
+            transition: opacity .5s ease, visibility .5s ease;
+        }
+        html.sg-ready #sg-loading { opacity: 0; visibility: hidden; pointer-events: none; }
+        html.sg-loading-instant #sg-loading { transition: none; }
+        .sg-load-ring { position: relative; width: 78px; height: 78px; }
+        .sg-load-ring::before, .sg-load-ring::after {
+            content: ""; position: absolute; border-radius: 50%;
+        }
+        .sg-load-ring::before {
+            inset: 0; border: 2px solid rgba(99,214,196,.13);
+            border-top-color: #63d6c4; border-right-color: rgba(99,214,196,.55);
+            box-shadow: 0 0 26px rgba(99,214,196,.18), inset 0 0 20px rgba(99,214,196,.08);
+            animation: sg-spin .9s linear infinite;
+        }
+        .sg-load-ring::after {
+            inset: 15px; border: 1px solid rgba(233,185,110,.14);
+            border-bottom-color: rgba(233,185,110,.8);
+            animation: sg-spin 1.7s linear infinite reverse;
+        }
+        .sg-load-core {
+            position: absolute; left: 50%; top: 50%; width: 7px; height: 7px;
+            margin: -3.5px 0 0 -3.5px; transform: rotate(45deg);
+            background: #e9b96e; box-shadow: 0 0 16px rgba(233,185,110,.9);
+            animation: sg-pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes sg-spin { to { transform: rotate(360deg); } }
+        @keyframes sg-pulse {
+            0%,100% { opacity: .35; transform: rotate(45deg) scale(.8); }
+            50%     { opacity: 1;   transform: rotate(45deg) scale(1.25); }
+        }
+        .sg-load-kicker {
+            font: 500 10px/1.6 ui-monospace, Consolas, "SF Mono", monospace;
+            letter-spacing: .32em; color: rgba(99,214,196,.78);
+        }
+        .sg-load-label { font-size: 13px; letter-spacing: .06em; color: #dceae7; }
+        .sg-load-scan {
+            position: relative; width: 172px; height: 2px; overflow: hidden;
+            background: rgba(99,214,196,.14); border-radius: 2px;
+        }
+        .sg-load-scan i {
+            position: absolute; top: 0; left: 0; width: 40%; height: 100%;
+            background: linear-gradient(90deg, transparent, #63d6c4, transparent);
+            animation: sg-scan 1.35s ease-in-out infinite;
+        }
+        @keyframes sg-scan { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+        @media (prefers-reduced-motion: reduce) {
+            .sg-load-ring::before, .sg-load-ring::after,
+            .sg-load-core, .sg-load-scan i { animation: none; }
+            #sg-loading { transition-duration: .01ms; }
+        }
+    </style>
+
+    <!--
+      加载顺序（严格）：
+        0) gl-arm-pose.js      —— 必须在任何 WebGL 上下文创建之前，
+                                  它包裹 texImage2D 原型，负责手臂姿势补丁
+        1) emote-config.js     —— 必须在 emotedriver.js 之前
+        2) emotedriver.js      —— wasm 版
+        3) emoteplayer.js      —— 共用 JS 层
+        4) libs（fflate 等）
+        5) model-loader.js —— 下载/解压 zip、解析 PSB 结构、算姿势配置，
+                              必须在业务脚本之前
+        6) 业务脚本
+    -->
+
+    <script src="gl-arm-pose.js"></script>
+    <script src="emote-config.js"></script>
+    <script src="../driver/emotedriver.js" charset="UTF-8"></script>
+    <script src="../driver/emoteplayer.js" charset="UTF-8"></script>
+    <script src="../libs/fflate.js"></script>
+
+    <!-- PSB 解析与姿势配置计算都内置在 model-loader.js 里，无需额外模块 -->
+    <script src="model-loader.js"></script>
+    <script src="lipsync.js"></script>
+    <script src="actions-config.js"></script>
+    <script src="config-validator.js"></script>
+    <script src="main.js"></script>
+
+    <!-- 场景控制条：默认固定展开的角色 tab + 左上角常驻「主页」+ 右侧隐藏开关与背景预览面板（纯 UI，不参与渲染） -->
+    <script src="scene-ui.js"></script>
+</head>
+
+<!-- wasm 异步就绪后由 EmoteDriver_Launch 调用 start() -->
+<body onload="EmoteDriver_Launch(start)">
+    <!-- 屏幕中央 loading：就绪后由 main.js 淡出；z-index 高于控制条与控制台 -->
+    <div id="sg-loading" role="status" aria-live="polite">
+        <div class="sg-load-ring"><i class="sg-load-core"></i></div>
+        <div class="sg-load-kicker">WORLD LINE RECONSTRUCTING</div>
+        <div class="sg-load-label" id="sg-loading-label">正在载入未来道具研究所…</div>
+        <div class="sg-load-scan"><i></i></div>
+    </div>
+    <canvas id="canvas"></canvas>
+</body>
+</html>

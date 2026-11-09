@@ -1,36 +1,118 @@
 # SteinsGateLabStage
 
-#### Description
-基于E-MOTE的命运石之门RE:BOOT角色网页展示
+Run *STEINS;GATE* character E-mote models in the browser, with arm-pose switching, touch reactions, voice playback and lip sync.
 
-#### Software Architecture
-Software architecture description
+> **Unofficial, non-commercial fan project. Not affiliated with MAGES., Nitroplus, or M2 Co., Ltd.**
+> This repository contains **no** original game assets (models, artwork, backgrounds, voice) and **no** E-mote runtime (proprietary SDK).
 
-#### Installation
+[中文](README.md)
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+---
 
-#### Instructions
+## Contents
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+| Entry | Description |
+|---|---|
+| `index.html` | Character archive page (world intro + Labmem roster), pure static |
+| `steins_gate/index.html` | E-mote player (**main feature**) — requires the prerequisites below |
 
-#### Contribution
+## Features
 
-1.  Fork the repository
-2.  Create Feat_xxx branch
-3.  Commit your code
-4.  Create Pull Request
+- **Direct PSB reading** — parses `.pure.psb` (PSB v4) binaries directly. No decompilation, no pre-generated config, no build step. Switching models means dropping a zip into `data/` and editing one constant.
+- **Arm-pose switching** — handles PSB 4.0 mutually exclusive append-parts (`insert` / `delete`) by patching the GPU texture upload, erasing the unused arm set. Works with an SDK runtime that only supports 3.9.8.
+- **Touch reactions** — hit areas derived from `charaProfile` labels (eye / mouth / bust / top …), each resolving to a random action from a pool, optionally with audio and variable interpolation.
+- **Lip sync** — offline WebAudio envelope analysis driving `face_talk` via rAF lookup; falls back to a timer-driven waveform when WebAudio is unavailable.
+- **Dev panel** — built-in inspector for selectors, poses and variables (`installDevPanel`).
 
+## Prerequisites
 
-#### Gitee Feature
+**This repository does not run out of the box.** Two categories of files are required and both are excluded by `.gitignore`:
 
-1.  You can use Readme\_XXX.md to support different languages, such as Readme\_en.md, Readme\_zh.md
-2.  Gitee blog [blog.gitee.com](https://blog.gitee.com)
-3.  Explore open source project [https://gitee.com/explore](https://gitee.com/explore)
-4.  The most valuable open source project [GVP](https://gitee.com/gvp)
-5.  The manual of Gitee [https://gitee.com/help](https://gitee.com/help)
-6.  The most popular members  [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+1. **E-mote runtime** → `driver/`
+   - Required: `emotedriver.js`, `emotedriver.wasm` (verified against the `driver_wasm_modularize` build), `emoteplayer.js`
+   - Obtain from [M2 Co., Ltd.](https://emote.mtwo.co.jp/) via an SDK application
+   - ⚠️ Proprietary software whose terms prohibit redistribution. **Never commit `driver/` to a public repository**; this project will not provide it.
+
+2. **Models and assets** → `data/` and `steins_gate/background/`
+   - `data/<character>/<name>.pure.psb.zip`, each containing one `pure.psb`
+   - `steins_gate/background/` — background images, with thumbnails under `thumbs/`
+   - Must be extracted from a copy of the game you legally own. Not provided here.
+
+Then serve over HTTP (`fetch` requires it; `file://` will not work):
+
+```bash
+python -m http.server 8000
+# open http://localhost:8000/steins_gate/
+```
+
+## Layout
+
+```
+index.html                  Character archive page
+steins_gate/
+  index.html                Player entry
+  main.js                   Bootstrap, canvas layout, arm switcher, dev panel
+  model-loader.js           PSB v4 parser + exclusive-parts config + loader
+  gl-arm-pose.js            Texture-level arm erase (hooks texImage2D / texSubImage2D)
+  lipsync.js                Lip sync (offline WebAudio analysis + fallback)
+  scene-ui.js               Scene UI, backgrounds, interaction
+  actions-config.js         Touch reaction config (region to action pool)
+  emote-config.js           Base model / action config
+  config-validator.js       Config validation
+driver/                     E-mote runtime (not in repo)
+libs/fflate.js              zip inflate (third-party)
+data/                       Models (not in repo)
+sounds/                     Voice (not in repo)
+docs/                       Technical write-ups
+```
+
+## Technical notes
+
+### Why parse PSB ourselves
+
+Across the 83 `EmotePlayer_*` / `EmoteDevice_*` functions exported by the wasm, the 69 that `emoteplayer.js` actually calls expose only `charaProfile` labels and `charaBounds` — **not atlas rectangles, the `source` table, or `customSelectorList`**. Exclusive arm sets are therefore not enumerable at the SDK level and must be read from the raw bytes. That is the sole reason `PsbReader` exists.
+
+The parser reads only the structure region (~1 MB) and skips the following ~200 MB of texture data, taking roughly 10 ms in-browser.
+
+### Why patch at the texture layer
+
+The runtime wasm is 3.9.8 and does not understand PSB 4.0 `insert` / `delete` semantics, so it draws both arm sets. Instead of modifying the SDK, the unused arm rectangles are erased to transparent while the atlas is uploaded through `texImage2D`.
+
+### Further reading
+
+| Document | For | Covers |
+|---|---|---|
+| [技术路线 — technical route](docs/手臂姿势修复技术路线.md) | Anyone reusing this approach | Root cause, the four grouping criteria, PSB v4 decoding rules, texture-patch details, verification, evolution history |
+| [实现说明 — usage guide](docs/手臂姿势切换实现说明.md) | Anyone modifying this code | Selector API, compat layer and timeline bridge, dev panel, swapping models, caveats |
+
+Both are in Chinese; the code and the tables above should be enough to follow along.
+
+## Known limitations
+
+- Only unencrypted, uncompressed PSB v4 `pure.psb`. MDF / PSZ wrappers, PSB v3, or other platform exports need extra header and wrapper handling.
+- Depends on the 3.9.8 runtime; future SDK changes may invalidate the texture-patch assumptions.
+- Hit areas rely on the model's own `charaProfile`; models without it degrade to no reactions.
+
+## Credits
+
+- **[NekoWebShow](https://github.com/Chocola-X/NekoWebShow)** (AGPL-3.0) — origin of this project. Model loading, PSB parsing, the arm patch and the UI are independent rewrites; **the lip-sync fallback waveform logic is adapted from that project** (`driveMouthFallback` in `main.js`).
+- **[FreeMote](https://github.com/UlyssesWu/FreeMote)** (**CC BY-NC-SA 4.0**) — PSB format understanding draws on the format description in `PsbHeader.cs` / `Psb.cs` / `PsbValues.cs`; model packing and verification used its CLI toolkit FreeMoteToolkit v4.9.0 (`PsBuild.exe` / `PsbDecompile.exe`). **No FreeMote code or binary is included.**
+- **[fflate](https://github.com/101arrowz/fflate)** (MIT) — `libs/fflate.js`.
+- **E-mote SDK** — © M2 Co., Ltd. Proprietary; not distributed here.
+
+## License
+
+**Code**: [AGPL-3.0](LICENSE). The project includes parts adapted from [NekoWebShow](https://github.com/Chocola-X/NekoWebShow) (also AGPL-3.0), so the work as a whole is licensed under AGPL-3.0.
+
+> AGPL section 13: if you deploy a modified version of this project as a publicly reachable network service, you must offer the corresponding source to its users.
+
+**Assets and the E-mote runtime** are not included in this repository and are not covered by its license. Models, artwork and voice data belong to MAGES. / Nitroplus; the E-mote SDK belongs to M2 Co., Ltd., whose terms forbid redistribution and commercial use. Running the project therefore requires you to obtain these files lawfully and to comply with their terms.
+
+This is why the project cannot be used commercially and offers no live demo — because there are no assets or runtime that could be distributed, not because the AGPL code above carries an added restriction.
+
+## Disclaimer
+
+- For technical research and study only. No original game assets are provided or distributed.
+- Models, backgrounds and voice must be supplied by the user; copyright remains with the respective owners.
+- "STEINS;GATE" and related characters are trademarks or registered trademarks of MAGES. / Nitroplus.
+- If a rights holder objects to this project, please open an issue and it will be addressed promptly.
