@@ -21,7 +21,7 @@ Run *STEINS;GATE* character E-mote models in the browser, with arm-pose switchin
 - **Direct PSB reading** — parses `.pure.psb` (PSB v4) binaries directly. No decompilation, no pre-generated config, no build step. Models dropped into `data/<character>/` appear in the character tab automatically; touch reactions are configured per model in the [action config guide](docs/动作配置指南.md).
 - **Arm-pose switching** — handles PSB 4.0 mutually exclusive append-parts (`insert` / `delete`) by patching the GPU texture upload, erasing the unused arm set. Works with an SDK runtime that only supports 3.9.8.
 - **Touch reactions** — hit areas derived from `charaProfile` labels (eye / mouth / bust / top …), each resolving to a random action from a pool, optionally with audio and variable interpolation.
-- **Lip sync** — offline WebAudio envelope analysis driving `face_talk` via rAF lookup; falls back to a timer-driven waveform when WebAudio is unavailable.
+- **Lip sync** — offline WebAudio envelope analysis driving `face_talk` via rAF lookup. No fallback playback path; audio failures are reported and skipped.
 - **Dev panel** — built-in inspector for selectors, poses and variables (`installDevPanel`).
 
 ## Prerequisites
@@ -57,7 +57,7 @@ steins_gate/
   main.js                   Bootstrap, canvas layout, arm switcher, dev panel
   model-loader.js           PSB v4 parser + exclusive-parts config + loader
   gl-arm-pose.js            Texture-level arm erase (hooks texImage2D / texSubImage2D)
-  lipsync.js                Lip sync (offline WebAudio analysis + fallback)
+  lipsync.js                Lip sync (offline WebAudio analysis, rAF lookup)
   scene-ui.js               Scene UI, backgrounds, interaction
   actions-config-loader.js  Loads config by model name, sparse extends, inventory reconcile
   emote-config.js           Base model / action config
@@ -99,14 +99,14 @@ All three are in Chinese; the code and the tables above should be enough to foll
 
 ## Credits
 
-- **[NekoWebShow](https://github.com/Chocola-X/NekoWebShow)** (AGPL-3.0) — origin of this project. Model loading, PSB parsing, the arm patch and the UI are independent rewrites; **the lip-sync fallback waveform logic is adapted from that project** (`driveMouthFallback` in `main.js`).
+- **[NekoWebShow](https://github.com/Chocola-X/NekoWebShow)** (AGPL-3.0) — origin of this project. The costume-name translation table and the WebAudio playback skeleton follow upstream's design approach; the bulk of the implementation — model loading, PSB parsing, the arm patch, scene UI, action configs and lip sync — was written separately.
 - **[FreeMote](https://github.com/UlyssesWu/FreeMote)** (**CC BY-NC-SA 4.0**) — PSB format understanding draws on the format description in `PsbHeader.cs` / `Psb.cs` / `PsbValues.cs`; model packing and verification used its CLI toolkit FreeMoteToolkit v4.9.0 (`PsBuild.exe` / `PsbDecompile.exe`). **No FreeMote code or binary is included.**
 - **[fflate](https://github.com/101arrowz/fflate)** (MIT) — `libs/fflate.js`.
 - **E-mote SDK** — © M2 Co., Ltd. Proprietary; not distributed here.
 
 ## License
 
-**Code**: [AGPL-3.0](LICENSE). The project includes parts adapted from [NekoWebShow](https://github.com/Chocola-X/NekoWebShow) (also AGPL-3.0), so the work as a whole is licensed under AGPL-3.0.
+**Code**: [AGPL-3.0](LICENSE). This project started from [NekoWebShow](https://github.com/Chocola-X/NekoWebShow) (also AGPL-3.0), so the work as a whole remains under AGPL-3.0.
 
 > AGPL section 13: if you deploy a modified version of this project as a publicly reachable network service, you must offer the corresponding source to its users.
 

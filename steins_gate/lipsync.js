@@ -3,6 +3,7 @@
 //
 //  LipSync        算法类：RMS / EMA 动态阈值 / 离线分析（环境无关）
 //  LipSyncPlayer  播放器：fetch → decode → 离线分析 → rAF 驱动 face_talk
+//                  音频不可用时明确告警并返回 null
 //  AudioPlayer    兼容旧名 = LipSyncPlayer
 // ============================================================
 
@@ -77,16 +78,6 @@ class LipSync {
         return timeline;
     }
 
-    /** 实时路径：AnalyserNode 时域数据(0~255) → RMS */
-    rmsFromTimeDomain(byteData) {
-        if (!byteData || byteData.length === 0) return 0.0;
-        let sum = 0;
-        for (let i = 0; i < byteData.length; i++) {
-            const centered = (byteData[i] - 128) / 128;
-            sum += centered * centered;
-        }
-        return Math.sqrt(sum / byteData.length);
-    }
 }
 
 // ============================================================
@@ -99,13 +90,11 @@ class LipSyncPlayer {
         this.lipsync = new LipSync(config && config.lipsync);
 
         this.context = null;
-        this.analyser = null;
         this.activeSource = null;
         this.bufferCache = new Map();
         this.timeline = null;
         this.startTime = 0;
         this.rafId = null;
-        this.fallbackTimer = null;
         this.active = false;
     }
 
@@ -117,7 +106,6 @@ class LipSyncPlayer {
     stop() {
         this.active = false;
         if (this.rafId !== null) { cancelAnimationFrame(this.rafId); this.rafId = null; }
-        if (this.fallbackTimer !== null) { clearInterval(this.fallbackTimer); this.fallbackTimer = null; }
         if (this.activeSource) {
             try { this.activeSource.stop(); } catch (_) { /* 已自然结束 */ }
             this.activeSource = null;
@@ -126,23 +114,13 @@ class LipSyncPlayer {
         if (player) player.setVariable('face_talk', 0, 120);
     }
 
-    // ---- AudioContext / Analyser ----
+    // ---- AudioContext ----
     _context() {
         if (!this.context) {
             const Ctor = window.AudioContext || window.webkitAudioContext;
             this.context = Ctor ? new Ctor() : null;
         }
         return this.context;
-    }
-
-    _ensureAnalyser() {
-        if (this.analyser) return this.analyser;
-        const ctx = this._context();
-        if (!ctx) return null;
-        this.analyser = ctx.createAnalyser();
-        this.analyser.fftSize = 512;
-        this.analyser.smoothingTimeConstant = 0.34;
-        return this.analyser;
     }
 
     // ---- 解码（带缓存）----
@@ -158,9 +136,6 @@ class LipSyncPlayer {
         }).then((decoded) => {
             this.bufferCache.set(url, decoded);
             return decoded;
-        }).catch((err) => {
-            console.warn('音频解码失败:', err);
-            return null;
         });
     }
 
@@ -172,9 +147,7 @@ class LipSyncPlayer {
             const source = ctx.createBufferSource();
             source.buffer = decoded;
 
-            const analyser = this._ensureAnalyser();
-            if (analyser) { source.connect(analyser); analyser.connect(ctx.destination); }
-            else { source.connect(ctx.destination); }
+            source.connect(ctx.destination);
 
             this.activeSource = source;
             this.active = true;
@@ -186,26 +159,16 @@ class LipSyncPlayer {
         });
     }
 
-    /** 回退路径：<Audio> + 定时器模拟口型 */
-    _playFallback(url) {
-        return new Promise((resolve) => {
-            const audio = new Audio(url);
-            audio.addEventListener('loadedmetadata', () => {
-                const durationMs = Number.isFinite(audio.duration) ? audio.duration * 1000 : 1200;
-                this._driveFallback(durationMs);
-                audio.addEventListener('ended', () => this.stop(), { once: true });
-                audio.addEventListener('error', () => this.stop(), { once: true });
-                audio.play().catch((err) => console.error('Audio playback error:', err));
-                resolve({ duration: durationMs / 1000 });
-            }, { once: true });
-            audio.addEventListener('error', () => resolve(null), { once: true });
-        });
-    }
-
+    /**
+     * 音频与口型只有 WebAudio 一条路径。
+     * 失败时统一告警、复位并返回 null —— 必须 resolve，
+     * 否则 main.js 的 _trigger().catch() 会跳过 _restore()，动作状态会卡住。
+     */
     _play(url) {
         return this._playWebAudio(url).catch((err) => {
-            console.warn('⚠️ WebAudio 播放失败，降级到 <Audio>:', err);
-            return this._playFallback(url);
+            console.warn('⚠️ 音频不可用，已跳过语音与口型:', err && err.message || err);
+            this.stop();
+            return null;
         });
     }
 
@@ -247,21 +210,6 @@ class LipSyncPlayer {
 
         player.setVariable('face_talk', value * gain, smoothMs);
         this.rafId = requestAnimationFrame(() => this._tick());
-    }
-
-    /** 回退：定时器模拟口型波形 */
-    _driveFallback(durationMs) {
-        const startedAt = performance.now();
-        this.active = true;
-        this.fallbackTimer = setInterval(() => {
-            if (!this.active) return;
-            const elapsed = performance.now() - startedAt;
-            if (elapsed > durationMs) { this.stop(); return; }
-            const wave = Math.sin(elapsed / 55) * 0.5 + 0.5;
-            const jitter = Math.random() * 2;
-            const player = this.getPlayer();
-            if (player) player.setVariable('face_talk', Math.min(8, 2 + wave * 5 + jitter), 80);
-        }, 90);
     }
 }
 

@@ -23,7 +23,7 @@
 - **模型直读**：直接解析 `.pure.psb`（PSB v4）二进制，无需反编译、无需预生成配置、无需构建步骤。模型放进 `data/<角色>/` 后自动出现在角色 tab；触摸反应按[动作配置指南](docs/动作配置指南.md)逐模型配置。
 - **手臂姿势切换**：针对 PSB 4.0 的互斥追加部件（`insert` / `delete`），在 GPU 纹理上传阶段打补丁，擦除未选中的那套手臂。适用于只支持到 3.9.8 的 SDK 运行时。
 - **触摸反应**：按 `charaProfile` 部位（eye / mouth / bust / top …）划分命中区，命中后从动作池随机抽一条执行，可携带语音与变量插值。
-- **口型同步**：WebAudio 离线分析音频包络后按 rAF 查表驱动 `face_talk`；WebAudio 不可用时回退到定时器波形。
+- **口型同步**：WebAudio 离线分析音频包络后按 rAF 查表驱动 `face_talk`；音频不可用时明确告警并跳过语音与口型，不提供第二条播放路径。
 - **开发者面板**：内置选择器 / 姿势 / 变量调试入口（`installDevPanel`）。
 
 ## 运行前提
@@ -59,7 +59,7 @@ steins_gate/
   main.js                   启动流程、画布布局、手臂切换、开发面板
   model-loader.js           PSB v4 解析 + 互斥部件配置 + 模型加载（单文件）
   gl-arm-pose.js            纹理层手臂擦除（拦截 texImage2D / texSubImage2D）
-  lipsync.js                口型同步（WebAudio 离线分析 + 回退）
+  lipsync.js                口型同步（WebAudio 离线分析 + rAF 查表）
   scene-ui.js               场景 UI、背景与交互
   actions-config-loader.js  按模型名读取配置、稀疏继承、库存对齐
   emote-config.js           模型与动作基础配置
@@ -99,14 +99,14 @@ wasm 导出了 83 个 `EmotePlayer_*` / `EmoteDevice_*`，其中 `emoteplayer.js
 
 ## 参考与致谢
 
-- **[NekoWebShow](https://github.com/Chocola-X/NekoWebShow)**（AGPL-3.0）—— 本项目的创作起点。模型加载、PSB 解析、手臂补丁与 UI 为独立重写；**口型同步的回退波形逻辑改编自该项目**（`main.js` 的 `driveMouthFallback`）。
+- **[NekoWebShow](https://github.com/Chocola-X/NekoWebShow)**（AGPL-3.0）—— 本项目的创作起点。服装名称译名对照表与 WebAudio 播放骨架参考了上游的设计思路；模型加载、PSB 解析、手臂补丁、场景 UI、动作配置与口型同步等主体实现为另行编写。
 - **[FreeMote](https://github.com/UlyssesWu/FreeMote)**（**CC BY-NC-SA 4.0**）—— PSB 格式理解参考其 `PsbHeader.cs` / `Psb.cs` / `PsbValues.cs` 的格式说明；模型的打包与校验使用其命令行工具 FreeMoteToolkit v4.9.0（`PsBuild.exe` / `PsbDecompile.exe`）。本项目**不包含** FreeMote 的任何代码或二进制。
 - **[fflate](https://github.com/101arrowz/fflate)**（MIT）—— `libs/fflate.js`。
 - **E-mote SDK** —— © M2 Co., Ltd.，专有软件，不在本仓库分发。
 
 ## 许可
 
-**代码**：[AGPL-3.0](LICENSE)。本项目包含改编自 [NekoWebShow](https://github.com/Chocola-X/NekoWebShow)（同为 AGPL-3.0）的部分，故整体按 AGPL-3.0 授权。
+**代码**：[AGPL-3.0](LICENSE)。本项目以 [NekoWebShow](https://github.com/Chocola-X/NekoWebShow)（同为 AGPL-3.0）为创作起点，故整体沿用 AGPL-3.0 授权。
 
 > AGPL 第 13 条：若你将本项目的修改版部署为可公开访问的网络服务，需向使用者提供对应源码。
 
