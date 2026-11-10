@@ -1,0 +1,76 @@
+  /* ============================================================
+     AMV 剪辑风格动效层（纯叠加，不进入文档流、不改导航与内容结构）
+     仅在 html.sg-fx-on 下生效：JS 依据 prefers-reduced-motion 与用户开关加类。
+     刻意不做「页面加载即播放」的闪帧 / 快切：刷新后画面保持静止，
+     效果只由用户交互触发 —— 滚动「剪入」、切章节的 RGB 分离、
+     变动率数字抖动、按钮 hover 擦除。
+     ============================================================ */
+  .sg-fx { position: fixed; inset: 0; z-index: 6; overflow: hidden; pointer-events: none; }
+  html:not(.sg-fx-on) .sg-fx { display: none; }
+  .sg-fx > * { position: absolute; }
+
+  /* CRT 扫描线 + 缓慢扫光：压到不干扰正文阅读的强度 */
+  .sg-fx__scan { inset: 0; opacity: .5;
+    background: repeating-linear-gradient(to bottom,
+      rgba(180, 245, 240, .035) 0 1px, transparent 1px 4px); }
+  .sg-fx__beam { left: 0; right: 0; top: -24vh; height: 24vh;
+    background: linear-gradient(to bottom, transparent, rgba(99, 214, 196, .07), transparent);
+    animation: sg-beam 9s linear infinite; }
+  @keyframes sg-beam { to { transform: translateY(140vh); } }
+
+  /* 周期性 glitch：标题 RGB 分离、金色水印错位、变动率数字抖动 */
+  .sg-fx__loopword { right: clamp(18px, 5vw, 70px); bottom: 12%;
+    font: 500 11px/1 var(--mono); letter-spacing: .34em;
+    color: rgba(99, 214, 196, .85); opacity: 0; }
+  html.sg-glitch .sg-fx__loopword { animation: sg-loopword .24s steps(1, end) both; }
+  @keyframes sg-loopword {
+    0%, 100% { opacity: 0; transform: translateX(10px); }
+    25% { opacity: .85; transform: translateX(-4px); }
+    60% { opacity: .6; transform: none; }
+  }
+  html.sg-glitch .hero h1 {
+    text-shadow: -4px 0 rgba(255, 72, 96, .62), 4px 0 rgba(72, 224, 255, .58); }
+  html.sg-glitch .hero::before { animation: sg-wm-glitch .24s steps(1, end) both; }
+  @keyframes sg-wm-glitch {
+    0%, 100% { transform: translateY(-50%); text-shadow: 0 0 52px rgba(233, 185, 110, .2); }
+    25% { transform: translate(-8px, -50%);
+          text-shadow: -8px 0 rgba(255, 72, 96, .35), 8px 0 rgba(72, 224, 255, .3); }
+    60% { transform: translate(6px, -50%);
+          text-shadow: 5px 0 rgba(255, 72, 96, .28), -5px 0 rgba(72, 224, 255, .24); }
+  }
+  html.sg-glitch .div-meter b { color: #fff;
+    text-shadow: 0 0 14px rgba(233, 185, 110, .8); }
+
+  /* 滚动「剪入」：卡片按同组顺序错峰切入，动画结束后移除类以恢复 hover 变换 */
+  html.sg-fx-on .fx-reveal { opacity: 0; }
+  html.sg-fx-on .fx-reveal.is-in {
+    animation: sg-cut-in .5s cubic-bezier(.16, .9, .3, 1) both;
+    animation-delay: var(--fx-d, 0ms); }
+  @keyframes sg-cut-in {
+    0% { opacity: 0; clip-path: inset(0 0 100% 0);
+         transform: translate3d(-12px, 16px, 0) skewX(-1.5deg); }
+    55% { opacity: 1; clip-path: inset(0 0 0 0); }
+    100% { opacity: 1; clip-path: inset(0 0 0 0); transform: none; }
+  }
+  /* 按钮 hover 加一道横向擦除闪帧（仅按钮区域，不铺满屏幕） */
+  html.sg-fx-on .btn { position: relative; overflow: hidden; }
+  html.sg-fx-on .btn::after { content: ""; position: absolute; inset: 0;
+    background: rgba(255, 255, 255, .32); opacity: 0; transform: translateX(-110%);
+    pointer-events: none; }
+  html.sg-fx-on .btn:hover::after { animation: sg-btn-sweep .32s ease-out both; }
+  @keyframes sg-btn-sweep {
+    0% { opacity: .55; transform: translateX(-110%); }
+    100% { opacity: 0; transform: translateX(110%); }
+  }
+
+  /* 右下角开关：关 / 开 两态，默认尊重系统减少动态效果设置 */
+  .sg-fx-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 11;
+    padding: 7px 11px; border: 1px solid var(--line); border-radius: 3px;
+    background: rgba(9, 21, 27, .82); color: var(--dim); cursor: pointer;
+    font: 400 10px/1 var(--mono); letter-spacing: .14em;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    transition: color .2s ease, border-color .2s ease; }
+  .sg-fx-toggle:hover { color: var(--accent); border-color: rgba(99, 214, 196, .5); }
+  .sg-fx-toggle span { color: var(--accent); }
+  .sg-fx-toggle[aria-pressed="false"] span { color: var(--dim); }
+  @media (max-width: 720px) { .sg-fx-toggle { right: 12px; bottom: 12px; } }

@@ -774,6 +774,12 @@ function installDevPanel(player, config) {
 .ed-val{width:30px;text-align:right;font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
 .ed-select{max-width:150px;padding:3px 6px;border:1px solid rgba(255,255,255,.18);
  border-radius:6px;background:rgba(0,0,0,.3);color:#eceff4;font:11px system-ui,sans-serif}
+/* ④ 时间线：每行「标签 + 一个下拉」，三个下拉左 / 右边缘严格对齐，
+   不允许换行（换行会把第二个差分槽甩到下一行左侧、且没有标签）。
+   flex-basis:0 让不同选项长度的 select 也得到完全相同的宽度。 */
+.ed-row.ed-row-tl{flex-wrap:nowrap}
+.ed-row-tl .ed-label{flex:0 0 92px;min-width:92px}
+.ed-row-tl .ed-select{flex:1 1 0;width:auto;max-width:none;min-width:0}
 .ed-search{width:100%;box-sizing:border-box;padding:5px 8px;margin-bottom:6px;
  border:1px solid rgba(255,255,255,.18);border-radius:6px;
  background:rgba(0,0,0,.25);color:#eceff4;font:12px system-ui,sans-serif}
@@ -940,18 +946,22 @@ details.ed-fold[open]>summary::before{content:'\\25BE '}
         sel.addEventListener('change', () => onPick(sel.value));
         return sel;
     };
-    const rowMain = el('div', 'ed-row');
-    rowMain.appendChild(el('span', 'ed-label', '主时间线'));
-    rowMain.appendChild(mkSelect(mains, player.mainTimelineLabel,
-        (v) => { player.mainTimelineLabel = v; }));
-    secTl.body.appendChild(rowMain);
-    const rowDiff = el('div', 'ed-row');
-    rowDiff.appendChild(el('span', 'ed-label', '差分槽 1 / 2'));
-    rowDiff.appendChild(mkSelect(diffs, player.diffTimelineSlot1,
-        (v) => { player.diffTimelineSlot1 = v; }));
-    rowDiff.appendChild(mkSelect(diffs, player.diffTimelineSlot2,
-        (v) => { player.diffTimelineSlot2 = v; }));
-    secTl.body.appendChild(rowDiff);
+    // 一个槽一行：各自带名称，且三个下拉共用同一列，避免换行后第二个槽跑到左侧无名状态。
+    const addTlRow = (label, tip, labels, current, onPick) => {
+        const row = el('div', 'ed-row ed-row-tl');
+        const lab = el('span', 'ed-label', label);
+        lab.title = tip;
+        row.appendChild(lab);
+        row.appendChild(mkSelect(labels, current, onPick));
+        secTl.body.appendChild(row);
+        return row;
+    };
+    addTlRow('主时间线', '模型的主时间线（待机 / 呼吸等）', mains, player.mainTimelineLabel,
+        (v) => { player.mainTimelineLabel = v; });
+    addTlRow('差分槽 1', '与主时间线同时播放的第一条差分时间线', diffs, player.diffTimelineSlot1,
+        (v) => { player.diffTimelineSlot1 = v; });
+    addTlRow('差分槽 2', '与主时间线同时播放的第二条差分时间线（与槽 1 相互独立）',
+        diffs, player.diffTimelineSlot2, (v) => { player.diffTimelineSlot2 = v; });
     secTl.wrap.id = 'ed-sec-timeline';
     body.appendChild(secTl.wrap);
 
