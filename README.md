@@ -20,7 +20,7 @@
 
 ## 功能
 
-- **模型直读**：直接解析 `.pure.psb`（PSB v4）二进制，无需反编译、无需预生成配置、无需构建步骤。换模型 = 把 zip 放进 `data/` 并改一行常量。
+- **模型直读**：直接解析 `.pure.psb`（PSB v4）二进制，无需反编译、无需预生成配置、无需构建步骤。模型放进 `data/<角色>/` 后自动出现在角色 tab；触摸反应按[动作配置指南](docs/动作配置指南.md)逐模型配置。
 - **手臂姿势切换**：针对 PSB 4.0 的互斥追加部件（`insert` / `delete`），在 GPU 纹理上传阶段打补丁，擦除未选中的那套手臂。适用于只支持到 3.9.8 的 SDK 运行时。
 - **触摸反应**：按 `charaProfile` 部位（eye / mouth / bust / top …）划分命中区，命中后从动作池随机抽一条执行，可携带语音与变量插值。
 - **口型同步**：WebAudio 离线分析音频包络后按 rAF 查表驱动 `face_talk`；WebAudio 不可用时回退到定时器波形。
@@ -51,6 +51,9 @@ python -m http.server 8000
 
 ```
 index.html                  角色档案页
+actions-config/             动作配置（镜像 data/ 的目录结构）
+  common.json                公共 base，无专属配置时兜底
+  <角色>/<模型>.json         专属演出，文件名与模型去掉打包后缀后同名，可缺省
 steins_gate/
   index.html                播放页入口
   main.js                   启动流程、画布布局、手臂切换、开发面板
@@ -58,9 +61,9 @@ steins_gate/
   gl-arm-pose.js            纹理层手臂擦除（拦截 texImage2D / texSubImage2D）
   lipsync.js                口型同步（WebAudio 离线分析 + 回退）
   scene-ui.js               场景 UI、背景与交互
-  actions-config.js         触摸反应配置（部位 → 动作池）
+  actions-config-loader.js  按模型名读取配置、稀疏继承、库存对齐
   emote-config.js           模型与动作基础配置
-  config-validator.js       配置校验
+  config-validator.js       配置 shape 校验（含 CLI 自测）
 driver/                     E-mote 运行时（不入库）
 libs/fflate.js              zip 解压（第三方）
 data/                       模型（不入库）
@@ -84,6 +87,7 @@ wasm 导出了 83 个 `EmotePlayer_*` / `EmoteDevice_*`，其中 `emoteplayer.js
 
 | 文档 | 面向 | 内容 |
 |---|---|---|
+| [动作配置指南](docs/动作配置指南.md) | 要定制角色演出的人 | 配置目录镜像命名、字段速查、稀疏继承、库存对齐、CLI 校验、排错表 |
 | [手臂姿势修复技术路线](docs/手臂姿势修复技术路线.md) | 想复用这套方法的人 | 根因、四条归组判据、PSB v4 解码规则、GPU 补丁要点、验证方法、演进史 |
 | [手臂姿势切换实现说明](docs/手臂姿势切换实现说明.md) | 要改这份代码的人 | 选择器 API、兼容层与时间线桥、开发者面板、换模型流程、注意事项 |
 

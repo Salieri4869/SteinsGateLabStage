@@ -18,7 +18,7 @@ Run *STEINS;GATE* character E-mote models in the browser, with arm-pose switchin
 
 ## Features
 
-- **Direct PSB reading** — parses `.pure.psb` (PSB v4) binaries directly. No decompilation, no pre-generated config, no build step. Switching models means dropping a zip into `data/` and editing one constant.
+- **Direct PSB reading** — parses `.pure.psb` (PSB v4) binaries directly. No decompilation, no pre-generated config, no build step. Models dropped into `data/<character>/` appear in the character tab automatically; touch reactions are configured per model in the [action config guide](docs/动作配置指南.md).
 - **Arm-pose switching** — handles PSB 4.0 mutually exclusive append-parts (`insert` / `delete`) by patching the GPU texture upload, erasing the unused arm set. Works with an SDK runtime that only supports 3.9.8.
 - **Touch reactions** — hit areas derived from `charaProfile` labels (eye / mouth / bust / top …), each resolving to a random action from a pool, optionally with audio and variable interpolation.
 - **Lip sync** — offline WebAudio envelope analysis driving `face_talk` via rAF lookup; falls back to a timer-driven waveform when WebAudio is unavailable.
@@ -49,6 +49,9 @@ python -m http.server 8000
 
 ```
 index.html                  Character archive page
+actions-config/             Action configs (mirrors the data/ layout)
+  common.json                Shared base, used when a model has no own config
+  <char>/<model>.json        Per-model performance; basename matches the model, optional
 steins_gate/
   index.html                Player entry
   main.js                   Bootstrap, canvas layout, arm switcher, dev panel
@@ -56,9 +59,9 @@ steins_gate/
   gl-arm-pose.js            Texture-level arm erase (hooks texImage2D / texSubImage2D)
   lipsync.js                Lip sync (offline WebAudio analysis + fallback)
   scene-ui.js               Scene UI, backgrounds, interaction
-  actions-config.js         Touch reaction config (region to action pool)
+  actions-config-loader.js  Loads config by model name, sparse extends, inventory reconcile
   emote-config.js           Base model / action config
-  config-validator.js       Config validation
+  config-validator.js       Config shape validation (with CLI self-test)
 driver/                     E-mote runtime (not in repo)
 libs/fflate.js              zip inflate (third-party)
 data/                       Models (not in repo)
@@ -82,10 +85,11 @@ The runtime wasm is 3.9.8 and does not understand PSB 4.0 `insert` / `delete` se
 
 | Document | For | Covers |
 |---|---|---|
+| [动作配置指南 — action config guide](docs/动作配置指南.md) | Anyone customizing reactions | Mirror-directory naming, field reference, sparse inheritance, inventory reconcile, CLI validation, troubleshooting |
 | [技术路线 — technical route](docs/手臂姿势修复技术路线.md) | Anyone reusing this approach | Root cause, the four grouping criteria, PSB v4 decoding rules, texture-patch details, verification, evolution history |
 | [实现说明 — usage guide](docs/手臂姿势切换实现说明.md) | Anyone modifying this code | Selector API, compat layer and timeline bridge, dev panel, swapping models, caveats |
 
-Both are in Chinese; the code and the tables above should be enough to follow along.
+All three are in Chinese; the code and the tables above should be enough to follow along.
 
 ## Known limitations
 

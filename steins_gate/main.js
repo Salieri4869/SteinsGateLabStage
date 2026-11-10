@@ -1071,9 +1071,6 @@ function createConfig(actionsConfig, modelUrl) {
 // ============================================================
 async function start() {
     const hideLoading = () => { if (window.SG_LOADING) window.SG_LOADING.hide(); };
-    const actionsConfig = resolveActionsConfig();
-    if (!actionsConfig) { hideLoading(); return; }
-    if (!validateActionsConfigSafe(actionsConfig)) { hideLoading(); return; }
 
     // 没指定模型时先问 data/ 的扫描结果：用第一个可用模型，不依赖任何写死的路径
     const modelUrl = await resolveModelUrl();
@@ -1084,7 +1081,28 @@ async function start() {
         return;
     }
 
+    // 动作配置按 data/<角色>/<模型> 镜像推导 actions-config/<角色>/<模型>.json，
+    // 与模型并行取；缺专属文件回退 common.json，两者都取不到就明确报错，不再静默无动作。
+    let loaded;
+    try {
+        loaded = await window.SGActionsConfig.load(modelUrl);
+    } catch (err) {
+        console.error('[ActionsConfig] 配置目录加载异常', err);
+        hideLoading();
+        alert('动作配置加载失败，请检查 actions-config/ 目录');
+        return;
+    }
+    const actionsConfig = loaded.config;
+    if (!actionsConfig) {
+        hideLoading();
+        console.error('❌ 未找到动作配置：actions-config/common.json');
+        alert('动作配置缺失，请检查 actions-config/common.json');
+        return;
+    }
+    if (!validateActionsConfigSafe(actionsConfig)) { hideLoading(); return; }
+
     const config = createConfig(actionsConfig, modelUrl);
+    const configSource = loaded.source;
     const canvas = document.getElementById('canvas');
     if (!canvas) { console.error('Canvas 不存在'); hideLoading(); return; }
 
@@ -1116,6 +1134,16 @@ async function start() {
             // SelectorAPI 的时间线桥会逐帧把值同步到 GPU 状态，可以正常播放。
             player.diffTimelineSlot3 = '';
             player.diffTimelineSlot4 = '';
+
+            // 库存对齐：attach 之后才有 player 的真实清单，把配置里写死的名字
+            // 求解成当前模型存在的名字、剔除无效引用，再交给 InteractionManager。
+            if (window.SGActionsConfig) {
+                try {
+                    window.SGActionsConfig.reconcile(config, player, configSource);
+                } catch (err) {
+                    console.warn('[ActionsConfig] 库存对齐失败，配置按原样使用', err);
+                }
+            }
 
             if (config.debug) window.player = player;
             console.log('armPose:', pose, '| armGL:', window.ArmPoseGL && window.ArmPoseGL.info());
@@ -1158,17 +1186,6 @@ async function start() {
             console.error('❌ 模型加载失败:', err);
             alert('模型加载失败，请检查路径、fflate.js 与模型文件');
         });
-}
-
-/** 读取 ACTIONS_CONFIG（浏览器全局 / Node require） */
-function resolveActionsConfig() {
-    const cfg = (typeof window !== 'undefined' && window.ACTIONS_CONFIG)
-        || (typeof require !== 'undefined' && require('./actions-config.js').ACTIONS_CONFIG);
-    if (!cfg) {
-        console.error('❌ 未找到 ACTIONS_CONFIG');
-        alert('动作配置缺失，请检查 actions-config.js 是否引入');
-    }
-    return cfg || null;
 }
 
 /** 安全校验（失败弹窗，不抛崩） */

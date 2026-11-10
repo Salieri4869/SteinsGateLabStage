@@ -1,0 +1,129 @@
+{
+  "doc": "chocola-koneko 专属演出。名字全部取自本模型真实清单（67 主时间线 / 48 差分 / 37 变量 / 18 marker）；变量名是单数 face_eye_open，与红莉栖的 face_eye_open_l/r 不同，这正是按模型单独配置的意义。独有 marker QQ 单独给了反应。没有语音文件，故不写 audio。",
+  "extends": "common.json",
+  "model": "chocola-koneko.pure.psb.zip",
+  "reactions": {
+    "eye": {
+      "pool": [
+        {
+          "timeline": "驚き00",
+          "diffSlot1": "悩み",
+          "diffSlot2": "戸惑い",
+          "variables": [
+            { "name": "face_eye_open", "value": 30, "duration": 500 },
+            { "name": "face_eye_LR", "value": -20, "duration": 400 },
+            { "name": "face_eye_UD", "value": 12, "duration": 350 },
+            { "name": "face_eye_hi", "value": 0, "duration": 200 },
+            { "name": "body_LR", "value": 22, "duration": 350 }
+          ],
+          "duration": 1300,
+          "recovery": [
+            { "name": "face_eye_open", "value": 20, "duration": 300 }
+          ]
+        },
+        {
+          "timeline": "困る00",
+          "diffSlot1": "ひく",
+          "diffSlot2": "がっかり",
+          "variables": [
+            { "name": "face_eyebrow", "value": 10, "duration": 800 },
+            { "name": "head_slant", "value": 8, "duration": 600 }
+          ],
+          "duration": 2600
+        }
+      ]
+    },
+    "mouth": {
+      "pool": [
+        {
+          "timeline": "楽しい00",
+          "diffSlot1": "笑い",
+          "diffSlot2": "にっこり",
+          "variables": [
+            { "name": "face_mouth", "value": 30, "duration": 500 },
+            { "name": "face_eye_open", "value": 8, "duration": 30 },
+            { "name": "face_cheek", "value": 6, "duration": 400 },
+            { "name": "face_eyebrow_sp", "value": 10, "duration": 700 }
+          ],
+          "duration": 2400
+        }
+      ]
+    },
+    "bust": {
+      "pool": [
+        {
+          "timeline": "頬染め00",
+          "diffSlot1": "ぶりっこ",
+          "diffSlot2": "はじらい",
+          "variables": [
+            { "name": "face_cheek", "value": 1, "duration": 250 },
+            { "name": "head_slant", "value": 2, "duration": 400 },
+            { "name": "head_UD", "value": 2, "duration": 380 },
+            { "name": "head_LR", "value": 2, "duration": 390 },
+            { "name": "body_slant", "value": 2, "duration": 420 },
+            { "name": "face_eye_sp", "value": 10, "duration": 350 },
+            { "name": "face_hitomi_sp", "value": 10, "duration": 360 }
+          ],
+          "duration": 1500
+        }
+      ]
+    },
+    "top": {
+      "pool": [
+        {
+          "timeline": "喜ぶ00",
+          "diffSlot1": "わくわく",
+          "diffSlot2": "ごきげん",
+          "variables": [
+            { "name": "head_LR", "value": 15, "duration": 400 },
+            { "name": "head_UD", "value": -10, "duration": 430 },
+            { "name": "head_slant", "value": 30, "duration": 550 },
+            { "name": "face_talk", "value": 3, "duration": 0 }
+          ],
+          "duration": 1400
+        }
+      ]
+    },
+    "QQ": {
+      "radius": 0.05,
+      "pool": [
+        {
+          "timeline": "ピョン",
+          "diffSlot1": "びっくり1",
+          "diffSlot2": "",
+          "variables": [
+            { "name": "act_sp", "value": 10, "duration": 300 },
+            { "name": "head_UD", "value": -18, "duration": 350 },
+            { "name": "body_UD", "value": 12, "duration": 350 }
+          ],
+          "duration": 1100
+        }
+      ]
+    }
+  },
+  "defaultState": {
+    "timeline": "平常",
+    "diffSlot1": "",
+    "diffSlot2": "",
+    "variables": [
+      { "name": "face_eye_open", "value": 0, "duration": 240 },
+      { "name": "face_eye_LR", "value": 0, "duration": 220 },
+      { "name": "face_eye_UD", "value": 0, "duration": 220 },
+      { "name": "face_eye_hi", "value": 0, "duration": 210 },
+      { "name": "face_eye_sp", "value": 0, "duration": 240 },
+      { "name": "face_hitomi_sp", "value": 0, "duration": 245 },
+      { "name": "face_mouth", "value": 0, "duration": 320 },
+      { "name": "face_talk", "value": 0, "duration": 0 },
+      { "name": "face_eyebrow", "value": 0, "duration": 300 },
+      { "name": "face_eyebrow_sp", "value": 0, "duration": 310 },
+      { "name": "face_cheek", "value": 0, "duration": 255 },
+      { "name": "head_LR", "value": 0, "duration": 270 },
+      { "name": "head_UD", "value": 0, "duration": 265 },
+      { "name": "head_slant", "value": 0, "duration": 275 },
+      { "name": "body_LR", "value": 0, "duration": 295 },
+      { "name": "body_UD", "value": 0, "duration": 305 },
+      { "name": "body_slant", "value": 0, "duration": 285 },
+      { "name": "act_sp", "value": 0, "duration": 240 }
+    ]
+  }
+}

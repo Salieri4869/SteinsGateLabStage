@@ -141,7 +141,8 @@
         4) libs（fflate 等）
         5) model-loader.js —— 下载/解压 zip、解析 PSB 结构、算姿势配置，
                               必须在业务脚本之前
-        6) 业务脚本
+        6) 业务脚本（config-validator / actions-config-loader / main / scene-ui）
+           动作配置不再由 JS 提供，改为 main.js 启动时按模型名读取 ../actions-config/
     -->
 
     <script src="gl-arm-pose.js"></script>
@@ -153,8 +154,8 @@
     <!-- PSB 解析与姿势配置计算都内置在 model-loader.js 里，无需额外模块 -->
     <script src="model-loader.js"></script>
     <script src="lipsync.js"></script>
-    <script src="actions-config.js"></script>
     <script src="config-validator.js"></script>
+    <script src="actions-config-loader.js"></script>
     <script src="main.js"></script>
 
     <!-- 场景控制条：默认固定展开的角色 tab + 左上角常驻「主页」+ 右侧隐藏开关与背景预览面板（纯 UI，不参与渲染） -->

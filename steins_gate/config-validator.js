@@ -11,6 +11,7 @@
 //    1) 浏览器 <script>      : window.validateActionsConfig
 //    2) Node require/import  : require('./config-validator.js')
 //    3) CLI 自测             : node config-validator.js
+//                             （直接校验 ../actions-config/ 下的 JSON，含 extends 合并）
 // ============================================================
 
 /** 扁平化 reactions → 动作数组 */
@@ -124,43 +125,77 @@ function validateActionsConfig(config) {
 }
 
 // ============================================================
-//  CLI 自测入口
+//  CLI 自测入口：直接校验 actions-config/ 下的 JSON
 // ============================================================
 function _runCliSelfTest() {
-    let config = null;
-    try {
-        config = require('./actions-config.js');
-    } catch (e) {
-        console.error('⚠️ 无法加载 ./actions-config.js，将使用示例 config 演示校验 API');
-    }
+    const fs = require('fs');
+    const path = require('path');
+    const root = path.join(__dirname, '..', 'actions-config');
+    const { mergeSparse } = require('./actions-config-loader.js');
 
-    const ACTIONS_CONFIG = (config && config.ACTIONS_CONFIG) || config;
-    if (!ACTIONS_CONFIG) {
-        console.log('（无可校验的 config，跳过）');
+    const readJson = (p) => {
+        try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
+        catch (e) { console.error('⚠️ 无法读取 ' + p + '：' + e.message); return null; }
+    };
+
+    const common = readJson(path.join(root, 'common.json'));
+    if (!common) {
+        console.error('❌ 缺少 actions-config/common.json');
+        process.exitCode = 1;
         return;
     }
 
-    console.log('=== 1. 配置校验 ===');
-    validateActionsConfig(ACTIONS_CONFIG);
-    console.log('✅ 校验通过\n');
+    // 与运行时一致：先校验公共 base，再把每份专属配置按 extends 稀疏合并后校验
+    const targets = [{ label: 'common.json', config: common }];
+    fs.readdirSync(root, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .forEach((d) => {
+            const dir = path.join(root, d.name);
+            fs.readdirSync(dir).filter((f) => f.endsWith('.json')).forEach((f) => {
+                const own = readJson(path.join(dir, f));
+                if (!own) return;
+                let base = common;
+                if (typeof own.extends === 'string' && own.extends !== 'common.json'
+                    && !/[/\\]/.test(own.extends)) {
+                    const ext = readJson(path.join(dir, own.extends));
+                    if (ext) base = mergeSparse(common, ext);
+                }
+                targets.push({ label: d.name + '/' + f, config: mergeSparse(base, own) });
+            });
+        });
 
-    console.log('=== 2. 复位来源解析 ===');
-    const parts = ACTIONS_CONFIG.reactions || {};
-    Object.keys(parts).forEach((key) => {
-        const pool = parts[key].pool || [];
-        console.log(`部位 "${key}", radius=${parts[key].radius}, 动作池条数=${pool.length}`);
-        pool.forEach((action, i) => {
-            const recoveryNames = _recoveryVarNames(action);
-            const vars = (action.variables || []).map((v) => v.name);
-            const viaRecovery = vars.filter((n) => recoveryNames.has(n));
-            const viaDefault = vars.filter((n) => !recoveryNames.has(n));
-            console.log(`  [${i + 1}] ${action.timeline || '(无timeline)'}`);
-            console.log(`      recovery 复位 : [${viaRecovery.join(', ') || '无'}]`);
-            console.log(`      defaultState 复位: [${viaDefault.join(', ') || '无'}]`);
+    let failed = 0;
+    targets.forEach(({ label, config }) => {
+        console.log('\n=== ' + label + ' ===');
+        try {
+            validateActionsConfig(config);
+            console.log('✅ 校验通过');
+        } catch (e) {
+            console.error('❌ ' + e.message);
+            failed++;
+        }
+        const parts = config.reactions || {};
+        Object.keys(parts).forEach((key) => {
+            const pool = parts[key].pool || [];
+            console.log(`部位 "${key}", radius=${parts[key].radius}, 动作池条数=${pool.length}`);
+            pool.forEach((action, i) => {
+                const recoveryNames = _recoveryVarNames(action);
+                const vars = (action.variables || []).map((v) => v.name);
+                const viaRecovery = vars.filter((n) => recoveryNames.has(n));
+                const viaDefault = vars.filter((n) => !recoveryNames.has(n));
+                console.log(`  [${i + 1}] ${action.timeline || '(无timeline)'}`);
+                console.log(`      recovery 复位 : [${viaRecovery.join(', ') || '无'}]`);
+                console.log(`      defaultState 复位: [${viaDefault.join(', ') || '无'}]`);
+            });
         });
     });
 
-    console.log('\n🎉 全部校验通过');
+    if (failed) {
+        console.error('\n❌ ' + failed + ' 份配置未通过');
+        process.exitCode = 1;
+    } else {
+        console.log('\n🎉 全部校验通过（共 ' + targets.length + ' 份配置）');
+    }
 }
 
 if (typeof require !== 'undefined' && require.main === module) {

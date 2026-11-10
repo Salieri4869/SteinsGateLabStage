@@ -1,0 +1,102 @@
+{
+  "doc": "牧瀬紅莉栖ab_白衣 的专属演出。文件名与 data/牧瀬紅莉栖/牧瀬紅莉栖ab_白衣.psb.m.pure.zip 去掉打包后缀后同名；未声明的字段继承 common.json。语音仅在此文件声明，其他模型不会串到红莉栖的台词。",
+  "extends": "common.json",
+  "model": "牧瀬紅莉栖ab_白衣.psb.m.pure.zip",
+  "reactions": {
+    "eye": {
+      "pool": [
+        {
+          "timeline": "表情_驚き00",
+          "diffSlot1": "悩み",
+          "diffSlot2": "悩み",
+          "audio": "../sounds/krs/resg10_10k_krs0046.xwma.opus",
+          "variables": [
+            { "name": "face_eye_open_l", "value": 30, "duration": 500 },
+            { "name": "face_eye_open_r", "value": 30, "duration": 500 },
+            { "name": "face_eye_LR", "value": -30, "duration": 400 },
+            { "name": "face_eye_UD", "value": 10, "duration": 350 },
+            { "name": "body_LR", "value": 30, "duration": 350 },
+            { "name": "face_eye_hi", "value": 0, "duration": 200 }
+          ],
+          "duration": 1200,
+          "recovery": [
+            { "name": "face_eye_open_l", "value": 20, "duration": 300 },
+            { "name": "face_eye_open_r", "value": 20, "duration": 300 }
+          ]
+        },
+        {
+          "timeline": "表情_困る00",
+          "diffSlot1": "ひく",
+          "diffSlot2": "ひく_固定",
+          "audio": "../sounds/krs/resg01_13_krs0040.xwma.opus",
+          "variables": [
+            { "name": "face_eyebrow", "value": 10, "duration": 800 }
+          ],
+          "duration": 2800
+        }
+      ]
+    },
+    "mouth": {
+      "pool": [
+        {
+          "timeline": "表情_笑う",
+          "diffSlot1": "ひく",
+          "diffSlot2": "表情_照れる",
+          "audio": "../sounds/krs/resg10_10k_krs0054.xwma.opus",
+          "variables": [
+            { "name": "face_mouth", "value": 30, "duration": 500 },
+            { "name": "face_eye_open_l", "value": 5, "duration": 30 },
+            { "name": "face_eye_open_r", "value": 5, "duration": 30 },
+            { "name": "face_eye_hi", "value": 10, "duration": 300 },
+            { "name": "face_eye_LR", "value": 10, "duration": 350 },
+            { "name": "face_eye_UD", "value": 10, "duration": 350 },
+            { "name": "face_eyebrow_sp", "value": 10, "duration": 700 }
+          ],
+          "duration": 6200
+        }
+      ]
+    },
+    "bust": {
+      "pool": [
+        {
+          "timeline": "表情_照れる",
+          "diffSlot1": "ぶりっこ",
+          "diffSlot2": "",
+          "audio": "../sounds/krs/resg10_11k_krs0000.xwma.opus",
+          "variables": [
+            { "name": "face_cheek", "value": 1, "duration": 250 },
+            { "name": "head_slant", "value": 2, "duration": 400 },
+            { "name": "head_UD", "value": 2, "duration": 380 },
+            { "name": "head_LR", "value": 2, "duration": 390 },
+            { "name": "body_slant", "value": 2, "duration": 420 },
+            { "name": "face_eye_sp", "value": 10, "duration": 350 },
+            { "name": "face_hitomi_sp", "value": 10, "duration": 360 },
+            { "name": "face_eyebrow", "value": 10, "duration": 370 },
+            { "name": "face_mouth", "value": 10, "duration": 340 }
+          ],
+          "duration": 1500
+        }
+      ]
+    },
+    "top": {
+      "pool": [
+        {
+          "timeline": "表情_頬染め01n",
+          "diffSlot1": "いやいや",
+          "diffSlot2": "戸惑い",
+          "audio": "../sounds/krs/resg11_08_krs0010.xwma.opus",
+          "variables": [
+            { "name": "head_LR", "value": 15, "duration": 400 },
+            { "name": "head_UD", "value": -10, "duration": 430 },
+            { "name": "head_slant", "value": 30, "duration": 550 },
+            { "name": "face_talk", "value": 3, "duration": 0 }
+          ],
+          "duration": 1200
+        }
+      ]
+    }
+  },
+  "defaultState": {
+    "timeline": "表情_普通"
+  }
+}

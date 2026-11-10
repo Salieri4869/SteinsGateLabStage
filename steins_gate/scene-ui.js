@@ -54,6 +54,9 @@
     function stripModelExt(name) {
         return String(name).replace(/\.zip$/i, '').replace(RAW_PSB_EXT, '');
     }
+    // 动作配置目录与模型 tab 共用同一套「去打包后缀」规则，避免两份实现漂移。
+    // IIFE 执行时立即挂出，不依赖 init()，因此 onload 里的 start() 一定拿得到。
+    window.SGStripModelExt = stripModelExt;
     var MODEL_KNOWN_KEY = 'sg-models-known-v1';    // 上次扫描到的全部造型路径（基线）
     var MODEL_UNREAD_KEY = 'sg-models-unread-v1';  // 新增、但还没打开看过的造型路径
     var KNOWN_MODELS = [
