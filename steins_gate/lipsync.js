@@ -14,12 +14,15 @@ class LipSync {
     constructor({
         meanDecayTime = 0.8,
         peakDecayTime = 0.15,
+        releaseDecayTime = 0.08,
         updateFps = 30,
         activationRatio = 0.3,
     } = {}) {
         const fps = updateFps <= 0 ? 1 : updateFps;
         this.meanSmoothing = Math.exp(-1 / (meanDecayTime * fps));
         this.peakSmoothing = Math.exp(-1 / (peakDecayTime * fps));
+        // 音量下降时均值的快速衰减系数，见 feedFrame
+        this.meanReleaseSmoothing = Math.exp(-1 / (releaseDecayTime * fps));
         this.activationRatio = activationRatio;
         this.updateFps = fps;
         this._mean = 0.0;
@@ -45,10 +48,18 @@ class LipSync {
         }
         const rms = Math.sqrt(sumSq / channelData.length);
 
-        this._mean = this._mean * this.meanSmoothing + rms * (1 - this.meanSmoothing);
+        // 均值走非对称 EMA：音量上升时慢跟（把底噪挡在阈值下），下降时快跟。
+        // 若两侧都用 0.8s，句尾音量骤降后慢均值仍停在先前的高响度上，
+        // threshold 会一直高于当前 rms，整段尾音被压成静音（闭嘴）。
+        const alpha = rms > this._mean
+            ? (1 - this.meanSmoothing)
+            : (1 - this.meanReleaseSmoothing);
+        this._mean += (rms - this._mean) * alpha;
         this._peak = Math.max(rms, this._peak * this.peakSmoothing);
 
-        const dynamicRange = this._peak - this._mean;
+        // peak 比 mean 衰减快，下降沿可能出现 peak < mean；钳到 0 避免
+        // dynamicRange 为负时 threshold 失去意义。
+        const dynamicRange = Math.max(this._peak - this._mean, 0);
         const threshold = this._mean + this.activationRatio * dynamicRange;
 
         if (rms <= threshold || dynamicRange <= 0.001) return 0.0;
@@ -103,15 +114,20 @@ class LipSyncPlayer {
         return this._play(url).then((buffer) => buffer);
     }
 
-    stop() {
+    /** 只停口型驱动，不碰音频源：时间线走完不等于音频播完 */
+    _stopLipSync(fadeMs = 50) {
         this.active = false;
         if (this.rafId !== null) { cancelAnimationFrame(this.rafId); this.rafId = null; }
+        const player = this.getPlayer();
+        if (player) player.setVariable('face_talk', 0, fadeMs);
+    }
+
+    stop() {
+        this._stopLipSync(120);
         if (this.activeSource) {
             try { this.activeSource.stop(); } catch (_) { /* 已自然结束 */ }
             this.activeSource = null;
         }
-        const player = this.getPlayer();
-        if (player) player.setVariable('face_talk', 0, 120);
     }
 
     // ---- AudioContext ----
@@ -194,8 +210,9 @@ class LipSyncPlayer {
         const lastFrame = this.timeline[this.timeline.length - 1];
 
         if (elapsed >= lastFrame.t) {
-            player.setVariable('face_talk', 0, 50);
-            this.stop();
+            // 时间线最后一帧是「帧起点」，比音频短一帧；这里只收口型，
+            // 让 source 自然 onended，避免把尾音一起切断。
+            this._stopLipSync();
             return;
         }
 
