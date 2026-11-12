@@ -7,6 +7,10 @@
 //  actions-config/common.json            ← 公共 base
 //
 //  两条来源按优先级：own（专属，与 common 稀疏合并）> common（通用兜底）
+//  「有没有专属配置」先查 actions-config/ 的 HTTP 目录索引（与 scene-ui.js 的
+//  模型/背景自动发现同源）：先判断再读取，不拿 HTTP 404 当缺省信号，
+//  所以正常路径根本不会发出会失败的请求。服务器不返回目录索引时才退回
+//  fetch 探测，保证任意静态托管下功能不变。
 //  配置在 resolveModelUrl() 之后与模型并行 fetch；
 //  引用校验必须等 ModelLoader.attach() 之后才有 player 的真实清单，
 //  所以 reconcile() 在 attach 的 .then() 里、new InteractionManager 之前调用。
@@ -28,6 +32,11 @@
 
     function decodeSafe(s) {
         try { return decodeURIComponent(s); } catch (_) { return s; }
+    }
+
+    /** 日志用：把 %E7%89%A7… 还原成中文；按 / 分段解码，保留路径分隔语义 */
+    function showPath(url) {
+        return String(url).split('/').map(decodeSafe).join('/');
     }
 
     /** 从 modelUrl 推导专属配置路径；不依赖任何目录索引。 */
@@ -52,9 +61,55 @@
     async function fetchJson(url) {
         try {
             var r = await fetch(url, { cache: 'no-store' });
-            if (!r.ok) return null;          // 404 是正常情况：该模型没有专属配置
+            if (!r.ok) return null;          // 仅降级路径会走到：服务器不给目录索引时
             return await r.json();
         } catch (_) { return null; }         // file:// / 断网 / 无目录权限
+    }
+
+    async function fetchText(url) {
+        try {
+            var r = await fetch(url, { cache: 'no-store' });
+            if (!r.ok) return null;
+            return await r.text();
+        } catch (_) { return null; }
+    }
+
+    /** 解析 HTTP 目录索引里的 <a href>；names=文件、dirs=子目录，均为解码后的名字。 */
+    function parseDirListing(html) {
+        if (typeof html !== 'string' || html.indexOf('href') < 0) return null;
+        var names = [], dirs = [];
+        var re = /href\s*=\s*["']([^"']+)["']/gi, m;
+        while ((m = re.exec(html)) !== null) {
+            var raw = m[1].split('?')[0].split('#')[0];
+            if (!raw || raw === '../' || raw === './' || raw.charAt(0) === '/') continue;
+            var isDir = /\/$/.test(raw);
+            var name = decodeSafe(raw.replace(/\/$/, ''));
+            if (!name) continue;
+            (isDir ? dirs : names).push(name);
+        }
+        return { names: names, dirs: dirs };
+    }
+
+    /**
+     * 先判断专属配置是否存在，再决定要不要发请求。
+     * 返回 true / false；返回 null = 服务器不支持目录索引，交给调用方退回 fetch 探测。
+     * 根目录本身一定存在（common.json 就在里面），因此正常路径不会产生 404。
+     */
+    async function probeOwn(p) {
+        var root = parseDirListing(await fetchText(CONFIG_ROOT));
+        // 用 common.json 当特征锚，避免把「任意路径都返回同一个 index.html」误当目录索引
+        if (!root || root.names.indexOf('common.json') < 0) return null;
+        if (!p.folder) return root.names.indexOf(p.stem + '.json') >= 0;
+        if (p.folder.indexOf('/') >= 0 || p.folder.indexOf('\\') >= 0) return null;
+        // 兼容目录项带尾斜杠（dirs）与不带（某些服务器列进 names）两种写法
+        if (root.dirs.indexOf(p.folder) < 0 && root.names.indexOf(p.folder) < 0) {
+            return false;   // 角色文件夹都没有，不必再问
+        }
+
+        var subUrl = CONFIG_ROOT + p.folder.split('/').map(encodeURIComponent).join('/') + '/';
+        var sub = parseDirListing(await fetchText(subUrl));
+        if (!sub) return null;
+        return sub.names.indexOf(p.stem + '.json') >= 0;
     }
 
     // 只用于文档 / 继承定位，不进入生效配置；命名统一不带下划线。
@@ -98,7 +153,15 @@
      */
     async function load(modelUrl) {
         var p = configPath(modelUrl);
-        var pair = await Promise.all([fetchJson(p.commonUrl), fetchJson(p.ownUrl)]);
+        var commonPromise = fetchJson(p.commonUrl);   // 必定存在，与目录探测并行发起
+        var exists = await probeOwn(p);               // true / false / null(索引不可用)
+        var ownPromise;
+        if (exists === false) {
+            ownPromise = Promise.resolve(null);       // 确定没有专属配置：根本不发请求
+        } else {
+            ownPromise = fetchJson(p.ownUrl);         // 确认存在，或降级时退回探测
+        }
+        var pair = await Promise.all([commonPromise, ownPromise]);
         var common = pair[0], own = pair[1];
         var base = common || null, extendsUrl = '', extendsOk = false;
 
@@ -114,7 +177,7 @@
             var ext = await fetchJson(extendsUrl);
             if (ext) { base = mergeSparse(base || {}, ext); extendsOk = true; }
             else if (root.console) {
-                console.warn('[ActionsConfig] extends 指向的文件不存在，已退回 common.json：' + extendsUrl);
+                console.warn('[ActionsConfig] extends 指向的文件不存在，已退回 common.json：' + showPath(extendsUrl));
             }
         }
 
@@ -127,16 +190,17 @@
             source: source, modelUrl: modelUrl, folder: p.folder, stem: p.stem,
             ownUrl: p.ownUrl, commonUrl: p.commonUrl,
             hasOwn: !!own, hasCommon: !!common,
+            ownProbe: exists === null ? 'fetch-降级' : '目录索引', ownExists: exists,
             extendsUrl: extendsUrl, extendsOk: extendsOk
         };
         root.SGActionsConfigLoad = info;   // 供控制台 / 验收脚本查看推导路径
         if (source === 'none' && root.console) {
-            console.error('[ActionsConfig] common.json 与专属配置都没读到：' + p.commonUrl);
+            console.error('[ActionsConfig] common.json 与专属配置都没读到：' + showPath(p.commonUrl));
         }
         if (root.console && console.info) {
             console.info('[ActionsConfig] 来源=' + source
                 + (own ? ' | 专属 ' + p.folder + '/' + p.stem + '.json' : ' | 无专属配置')
-                + ' | ' + p.ownUrl);
+                + ' | ' + showPath(p.ownUrl));
         }
         return { config: config, source: source, info: info };
     }
@@ -197,8 +261,10 @@
     /**
      * attach 之后、InteractionManager 之前：把配置和当前模型清单对齐。
      * 直接原地修改 config（createConfig 返回的对象已被各层共享引用）。
+     * @param {Function} [canPlace] (key) => 布尔，部位能否定位；
+     *        不给时退回「charaProfile 里必须有同名 marker」的旧判定。
      */
-    function reconcile(config, player, source) {
+    function reconcile(config, player, source, canPlace) {
         var mains = (player.mainTimelineLabels || []).slice();
         var diffs = (player.diffTimelineLabels || []).slice();
         var vars = (player.variableList || []).map(function (v) {
@@ -238,11 +304,15 @@
 
         // ---- reactions ----
         var reactions = config.reactions || {};
+        var placeable = typeof canPlace === 'function' ? canPlace : null;
         Object.keys(reactions).forEach(function (key) {
             var part = reactions[key];
-            if (markers.indexOf(key) < 0) {
+            // marker 名对不上不再等于「点不到」：矩形锚点、上下界比例都能定位，
+            // 交给调用方的 canPlace 判断（不给则沿用旧判定）
+            var ok = placeable ? !!placeable(key) : markers.indexOf(key) >= 0;
+            if (!ok) {
                 delete reactions[key];
-                report.removedParts.push(key + '（marker 不存在）');
+                report.removedParts.push(key + '（无锚点且无法推导）');
                 return;
             }
             if (!part || !Array.isArray(part.pool)) return;

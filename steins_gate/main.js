@@ -285,6 +285,56 @@ class TransformController {
 }
 
 // ============================================================
+//  命中区域：一个部位的可点击范围从哪里来
+//
+//  charaProfile 的锚点并不总是可用的：有的骨架把 bust 写成上下界的中点
+//  （占位值，换算后落到画布外），有的干脆不写。所以按「从准到兜底」分层取，
+//  第一个成立的胜出，全部用同一套屏幕坐标（元素内显示像素）表示：
+//
+//    1 原生矩形       模型里与部位同前缀的 4 个锚点（2 横 2 纵，见 rectOf）
+//    2 原生点         getMarkerPosition(<key>)，锚点落在可见绘制区内
+//    3 bust 兜底     上界 top + 1/4 ×（下界 bottom − 上界）
+//
+//  第 3 层只服务 bust：它常被写成上下界中点（占位值），换算后落到画布外，个别模型
+//  干脆没这个键。1/4 来自 S;G 人类骨架实测的 (bust−top)/(bottom−top) = 0.2436~0.2452。
+//  三层都不成立的部位直接剔除（0 个 marker 的模型没有可用依据，不猜位置）。
+// ============================================================
+const BUST_AT = 0.25;
+
+/**
+ * 部位的四角矩形：在 charaProfile 里找同前缀的 4 个键，按后缀里的 x / y 分成两组，
+ * 各取最小最大还原成矩形。不假定后缀怎么写（AX/AY/BX/BY、X1/Y1/X2/Y2 都能认），
+ * 但要求后缀恰好两位（角 + 轴），否则 bust 会吃到 bustleAX、eye 会吃到 eyebrowAX。
+ * 不成立时返回 null，交给下一层。
+ * 例：chocola 的 head → headAX -180, headAY -664, headBX 176, headBY -266
+ */
+function rectOf(prof, key) {
+    const xs = [], ys = [];
+    let found = 0;
+    Object.keys(prof).forEach((k) => {
+        if (!k.startsWith(key)) return;
+        const suffix = k.slice(key.length).toLowerCase();
+        if (suffix.length !== 2) return;
+        const v = prof[k];
+        if (!Number.isFinite(v)) return;
+        found++;
+        if (suffix.includes('x')) xs.push(v);
+        else if (suffix.includes('y')) ys.push(v);
+    });
+    if (found !== 4 || xs.length !== 2 || ys.length !== 2) return null;
+    return { ax: Math.min(...xs), ay: Math.min(...ys), bx: Math.max(...xs), by: Math.max(...ys) };
+}
+
+/** 该部位能不能定位（供 actions-config-loader 的库存对齐判断是否保留；与 _regionOf 的分层一一对应） */
+function canPlacePart(player, key) {
+    const prof = (player && player.charaProfile) || {};
+    const hasRect = !!rectOf(prof, key);
+    const hasPoint = Number.isFinite(prof[key]);
+    const hasBand = key === 'bust' && Number.isFinite(prof.top) && Number.isFinite(prof.bottom);
+    return hasRect || hasPoint || hasBand;
+}
+
+// ============================================================
 //  InteractionManager —— 命中判定 + 触发 + 恢复
 // ============================================================
 class InteractionManager {
@@ -301,7 +351,8 @@ class InteractionManager {
         ]);
         this._baseScale = player.scale;
         this._bindEvents();
-        requestAnimationFrame(() => this._logMarkers());
+        if (this.debug) window.SGInteraction = this;   // 控制台/验收脚本：SGInteraction.regions()
+        requestAnimationFrame(() => this._logRegions());
     }
 
     _log(...args) { if (this.debug) console.log(...args); }
@@ -335,22 +386,69 @@ class InteractionManager {
         return { x: pointer.clientX - rect.left, y: pointer.clientY - rect.top };
     }
 
-    // ---- Marker ----
-
-    _markerPos(name) {
-        const raw = this.player && this.player.getMarkerPosition(name);
-        if (!raw) return null;
-        if (typeof raw.offsetX === 'number') return { x: raw.offsetX, y: raw.offsetY };
-        if (typeof raw.clientX === 'number') return { x: raw.clientX, y: raw.clientY };
-        return null;
+    /**
+     * canvas 缓冲坐标 → 元素内显示像素。
+     * SDK 的坐标都以缓冲（canvas.width/height）为基准，而画面按 object-fit: contain
+     * 缩放在元素里，留了黑边，所以必须走绘制区换算，不能只除以 DPR。
+     */
+    _fromBuffer(bx, by) {
+        const cr = this._contentRect();
+        const sx = cr.width / (this.canvas.width || 1);
+        const sy = cr.height / (this.canvas.height || 1);
+        return { x: cr.x + bx * sx, y: cr.y + by * sy };
     }
 
-    /** marker 坐标 → 显示像素（除以 DPR） */
-    _markerPosScreen(name) {
-        const raw = this._markerPos(name);
-        if (!raw) return null;
-        const dpr = this._dpr();
-        return { x: raw.x / dpr, y: raw.y / dpr };
+    // ---- Marker ----
+
+    /** marker → 元素内显示像素；模型里没有这个锚点时返回 null */
+    _markerPos(name) {
+        const player = this.player;
+        if (!player || !player.initialized) return null;
+        const prof = player.charaProfile || {};
+        // SDK 对不存在的 marker 不返回 null，而是把坐标算成 (0,0)（= 画布中心）。
+        // 先拦掉，否则缺锚点的部位会拿到画布中心这个假坐标。
+        if (!Number.isFinite(prof[name])) return null;
+        // SDK 里 marker 恒在角色空间 x = 0，只有 y，走的也是下面这套变换
+        return this._charaToScreen(0, prof[name]);
+    }
+
+    /** 角色空间 (x, y) → 元素内显示像素：与 SDK getMarkerPosition 同一套变换 */
+    _charaToScreen(x, y) {
+        const s = this.player.getState('scale') || 1;
+        const rot = this.player.getState('rot') || 0;
+        const bx = this.player.getState('coordX') || 0;
+        const by = this.player.getState('coordY') || 0;
+        const sin = Math.sin(rot), cos = Math.cos(rot);
+        const px = x * cos * s + y * -sin * s + bx;
+        const py = x * sin * s + y * cos * s + by;
+        return this._fromBuffer(px + this.canvas.width / 2, py + this.canvas.height / 2);
+    }
+
+    /** 原生矩形锚点（同前缀 4 个，见 rectOf），没有就返回 null */
+    _nativeRect(key) {
+        const prof = (this.player && this.player.charaProfile) || {};
+        const box = rectOf(prof, key);
+        if (!box) return null;
+        // 两个对角各走一次同一套变换，再摆正成左上/右下
+        const a = this._charaToScreen(box.ax, box.ay);
+        const b = this._charaToScreen(box.bx, box.by);
+        const rect = {
+            x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y),
+            x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y),
+        };
+        return (rect.x1 - rect.x0 > 1 && rect.y1 - rect.y0 > 1) ? rect : null;
+    }
+
+    /** 角色上下界在屏幕上的区间（top/bottom 锚点）；缺失或退化时退回整个绘制区 */
+    _bodyBand() {
+        const cr = this._contentRect();
+        const top = this._markerPos('top');
+        const bottom = this._markerPos('bottom');
+        // 跨度不足画面 15% 说明拿到的是退化值（如两者都等于占位值），不可信
+        if (top && bottom && Math.abs(bottom.y - top.y) > cr.height * 0.15) {
+            return { y0: top.y, span: bottom.y - top.y };
+        }
+        return { y0: cr.y, span: cr.height };
     }
 
     /** 命中判定半径（显示像素），随缩放 factor 放大 */
@@ -368,6 +466,56 @@ class InteractionManager {
         return (cur && base > 0) ? (cur / base) : 1;
     }
 
+    /**
+     * 部位的可点击区域。返回
+     *   { kind:'circle', x, y, r, source } 或 { kind:'rect', x0, y0, x1, y1, source }
+     * source 只用于调试日志：rect / marker / ratio / clamp
+     */
+    _regionOf(key, part) {
+        const cr = this._contentRect();
+        const r = this._effectiveRadius(part);
+
+        // 1 原生矩形
+        const rect = this._nativeRect(key);
+        if (rect) return Object.assign({ kind: 'rect', source: 'rect' }, rect);
+
+        // 2 原生点：锚点在可见绘制区里就直接用，等价于原来的行为
+        const pos = this._markerPos(key);
+        if (pos && pos.x > cr.x - r && pos.x < cr.x + cr.width + r
+            && pos.y > cr.y - r && pos.y < cr.y + cr.height + r) {
+            return { kind: 'circle', x: pos.x, y: pos.y, r, source: 'marker' };
+        }
+
+        // 3 兜底：bust 用上下界重算（它的锚点常是占位值，或干脆没这个键）；
+        //   其它部位缺锚点就不猜位置，只把越界的锚点夹回画面。
+        const prof = (this.player && this.player.charaProfile) || {};
+        const hasBand = key === 'bust' && Number.isFinite(prof.top) && Number.isFinite(prof.bottom);
+        if (!pos && !hasBand) return null;
+        const band = hasBand ? this._bodyBand() : null;
+        const x = pos ? pos.x : cr.x + cr.width / 2;
+        const y = band ? band.y0 + BUST_AT * band.span : pos.y;
+        // 夹回绘制区，别让判定圆有一半在画面外
+        const lo = cr.y + r * 0.55;
+        const hi = cr.y + cr.height - r * 0.55;
+        return {
+            kind: 'circle', x, y: Math.min(Math.max(y, lo), hi),
+            r, source: band ? 'ratio' : 'clamp',
+        };
+    }
+
+    /** 归一化距离：圆用 dist/r，矩形用切比雪夫距离（越靠中心越小，两者可直接比较） */
+    _score(p, region) {
+        if (region.kind === 'rect') {
+            const hw = (region.x1 - region.x0) / 2, hh = (region.y1 - region.y0) / 2;
+            if (hw <= 0 || hh <= 0) return Infinity;
+            const dx = Math.abs(p.x - (region.x0 + hw)) / hw;
+            const dy = Math.abs(p.y - (region.y0 + hh)) / hh;
+            return Math.max(dx, dy);
+        }
+        const d = Math.hypot(p.x - region.x, p.y - region.y);
+        return region.r > 0 ? d / region.r : Infinity;
+    }
+
     // ---- 事件 ----
 
     _bindEvents() {
@@ -382,27 +530,37 @@ class InteractionManager {
         this.canvas.addEventListener('touchend', (e) => e.preventDefault(), { passive: false });
     }
 
-    // ---- 调试：marker 对齐检查 ----
-    _logMarkers() {
+    // ---- 调试：命中区域检查 ----
+    _logRegions() {
         if (!this.debug) return;
-        const profile = this.player && this.player.charaProfile;
-        const profileKeys = profile && typeof profile === 'object' ? Object.keys(profile) : [];
-        this._log('📐 charaProfile keys:', profileKeys.join(', ') || '(无)');
+        const profile = (this.player && this.player.charaProfile) || {};
+        this._log('📐 charaProfile keys:', Object.keys(profile).join(', ') || '(无)');
 
-        Object.keys(this.config.reactions).forEach((key) => {
-            if (profileKeys.length > 0 && !profile.hasOwnProperty(key)) {
-                this._warn(`⚠️ "${key}" 不在 charaProfile 中，将无法命中`);
-                return;
-            }
-            const pos = this._markerPosScreen(key);
-            if (pos) this._log(`📍 ${key}: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})`);
-            else this._warn(`⚠️ "${key}" 无坐标`);
+        const regions = this.regions();
+        const parts = [], missing = [];
+        Object.keys(regions).forEach((key) => {
+            const g = regions[key];
+            if (!g) { missing.push(key); return; }
+            parts.push(g.kind === 'rect'
+                ? `${key}[(${g.x0.toFixed(0)},${g.y0.toFixed(0)})-(${g.x1.toFixed(0)},${g.y1.toFixed(0)})]/${g.source}`
+                : `${key}(${g.x.toFixed(0)},${g.y.toFixed(0)})r${g.r.toFixed(0)}/${g.source}`);
         });
+        if (parts.length) this._log('📍 判定区 ' + parts.join(' · '));
+        if (missing.length) this._warn(`⚠️ 定位不到：${missing.join('、')}`);
+    }
+
+    /** 当前各部位的判定区域（控制台 / 验收脚本用） */
+    regions() {
+        const out = {};
+        Object.keys(this.config.reactions).forEach((key) => {
+            out[key] = this._regionOf(key, this.config.reactions[key]);
+        });
+        return out;
     }
 
     // ---- 眼神追踪 ----
     _onPointerMove(pointer) {
-        const eye = this._markerPosScreen('eye');
+        const eye = this._markerPos('eye');
         if (!eye) return;
         const p = this._pointerPos(pointer);
         const dx = p.x - eye.x, dy = p.y - eye.y;
@@ -442,28 +600,23 @@ class InteractionManager {
         if (this.busy) return;
         const p = this._pointerPos(pointer);
 
-        // 方案 B（治本）：区域重叠时，选「归一化距离 dist/radius 最小」的部位，
-        // 即离该部位判定中心「相对最近」的那一个，消除遍历顺序依赖。
-        // （eye 圆与 mouth 圆重叠时，点在嘴附近会因更靠近 mouth 中心而归 mouth）
-        let best = null; // { key, part, dist, radius, score }
+        // 区域重叠时选「归一化距离最小」的部位，与遍历顺序无关：
+        // eye 圆与 mouth 圆重叠时，点在嘴附近会因更靠近 mouth 中心而归 mouth。
+        let best = null; // { key, part, score, source }
         for (const key of Object.keys(this.config.reactions)) {
             const part = this.config.reactions[key];
-            const center = this._markerPosScreen(key);
-            if (!center) continue;
-            const dist = Math.hypot(p.x - center.x, p.y - center.y);
-            const radius = this._effectiveRadius(part);
-            if (dist < radius) {
-                const score = radius > 0 ? dist / radius : Infinity; // 归一化：越靠近中心越小
-                if (!best || score < best.score) {
-                    best = { key, part, dist, radius, score };
-                }
+            const region = this._regionOf(key, part);
+            if (!region) continue;
+            const score = this._score(p, region);
+            if (score <= 1 && (!best || score < best.score)) {
+                best = { key, part, score, source: region.source };
             }
         }
 
         if (best && best.part.pool && best.part.pool.length > 0) {
             const action = this._pickAction(best.part.pool);
             if (action) {
-                this._log(`🎯 命中 ${best.key} (${best.dist.toFixed(1)} < ${best.radius.toFixed(1)}, 归一化=${best.score.toFixed(2)})`);
+                this._log(`🎯 命中 ${best.key} · 归一化 ${best.score.toFixed(2)} · 区域 ${best.source}`);
                 this._trigger(action);
                 return;
             }
@@ -490,7 +643,7 @@ class InteractionManager {
         audioPromise.then((buffer) => {
             const audioMs = buffer && buffer.duration ? buffer.duration * 1000 : 0;
             const holdMs = Math.max(action.duration || 0, audioMs, DEFAULT_HOLD_MS);
-            this._log(`  保持 ${holdMs.toFixed(0)}ms 后恢复`);
+            this._log(`   ⏱ 保持 ${holdMs.toFixed(0)}ms`);
             setTimeout(() => this._restore(action), holdMs);
         }).catch((err) => {
             console.error('动作执行出错:', err);
@@ -505,17 +658,23 @@ class InteractionManager {
         if (action.diffSlot1 !== undefined) player.diffTimelineSlot1 = action.diffSlot1 || '';
         if (action.diffSlot2 !== undefined) player.diffTimelineSlot2 = action.diffSlot2 || '';
 
+        const applied = [];
         (action.variables || []).forEach((item) => {
             const apply = () => {
                 if (this._validVariables.size > 0 && !this._validVariables.has(item.name)) {
                     this._warn(`⚠️ 变量 "${item.name}" 不在模型中，跳过`); return;
                 }
+                const ms = item.duration || DEFAULT_FADE_TIME;
                 // ★ 对齐 readme setVariable(label, value, ms = 0, easing = 0)
-                player.setVariable(item.name, item.value, item.duration || DEFAULT_FADE_TIME);
-                this._log(`  ${item.name} = ${item.value} (${item.duration || DEFAULT_FADE_TIME}ms)`);
+                player.setVariable(item.name, item.value, ms);
+                const desc = `${item.name}=${item.value}(${ms}ms)`;
+                // 带 delay 的变量各自成行，免得和后面的动作混在一起
+                if (item.delay > 0) this._log(`   ⏳ ${item.delay}ms 后 ${desc}`);
+                else applied.push(desc);
             };
             if (item.delay > 0) setTimeout(apply, item.delay); else apply();
         });
+        if (applied.length) this._log('   变量 ' + applied.join(' '));
     }
 
     /**
@@ -546,17 +705,19 @@ class InteractionManager {
         );
         const changedNames = new Set((action && action.variables || []).map((v) => v.name));
 
+        const restored = [];
         changedNames.forEach((name) => {
             const source = recoveryMap.get(name)
                 || (def && def.variables || []).find((v) => v.name === name);
             if (!source) return;
             if (this._validVariables.size > 0 && !this._validVariables.has(name)) return;
+            const ms = source.duration || DEFAULT_FADE_TIME;
             // ★ 对齐 readme: setVariable(label, value, ms)
-            player.setVariable(name, source.value, source.duration || DEFAULT_FADE_TIME);
-            this._log(`  ↺ ${name} = ${source.value} (${source.duration || DEFAULT_FADE_TIME}ms)`);
+            player.setVariable(name, source.value, ms);
+            restored.push(`${name}=${source.value}(${ms}ms)`);
         });
 
-        this._log('🔄 已恢复');
+        this._log('🔄 已恢复' + (restored.length ? ' ' + restored.join(' ') : ''));
         this.audio.stop();
         this.busy = false;
     }
@@ -1139,7 +1300,10 @@ async function start() {
             // 求解成当前模型存在的名字、剔除无效引用，再交给 InteractionManager。
             if (window.SGActionsConfig) {
                 try {
-                    window.SGActionsConfig.reconcile(config, player, configSource);
+                    // 第四个参数告诉库存对齐「哪些部位能被定位」：锚点缺失但能用
+                    // 上下界/矩形推出的部位要保留，而不是按 marker 名一删了之
+                    window.SGActionsConfig.reconcile(config, player, configSource,
+                        (key) => canPlacePart(player, key));
                 } catch (err) {
                     console.warn('[ActionsConfig] 库存对齐失败，配置按原样使用', err);
                 }
