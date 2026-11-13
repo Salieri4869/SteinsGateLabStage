@@ -898,7 +898,7 @@ function installDevPanel(player, config) {
         const st = document.createElement('style');
         st.id = 'emote-dev-style';
         st.textContent = `
-/* 顶部 56px 留给 scene-ui.js 的角色 tab 控制条（含常驻「主页」与 hover 滑出的按钮），
+/* 顶部 56px 留给 scene-ui.js 的控制条（主页槽位、角色 tab、右侧工具按钮），
    否则展开控制台时标题栏与「收起 ›」会被控制条完全盖住、点不到。 */
 #emote-dev-panel{position:fixed;top:56px;right:0;height:calc(100vh - 56px);width:340px;max-width:92vw;
  z-index:60;display:flex;flex-direction:column;color:#eceff4;

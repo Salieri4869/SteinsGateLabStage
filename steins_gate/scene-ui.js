@@ -1,57 +1,39 @@
 // ============================================================
-//  scene-ui.js —— 研究所页面场景控制条
+//  scene-ui.js —— 场景控制条与右侧面板（排序 / 造型 / 背景）
 //
-//  ① 顶部控制条：默认固定展开，与鼠标位置无关。整条从左到右是
-//     「← 主页」（独立槽位，与角色 tab 同排同尺寸，**不在滚动容器里**，
-//      所以横向滚动时模型 tab 永远不会压到它）→ 角色 tab → 切换背景 / ▲ 隐藏。
-//     角色 tab 一人一个，名字直接取 data/ 下的**角色文件夹名**：
-//       往 data/<角色>/ 里丢模型，这个角色就会出现在 tab 上；
-//       压缩包（任何 *.zip，内部含 .psb 即可）与未压缩的裸 PSB
-//       （*.psb / *.psb.m / *.pure.psb / *.psb.m.pure.psb）都认；
-//       点角色 tab 展开造型面板，列出该文件夹下的全部模型，点造型才切换
-//       （写 ?model=<角色/文件名>，重载页面）。同名角色只占一个 tab。
-//     角色 tab 顺序默认按名字排；想固定顺序就写 actions-config/order.json 的
-//     roles（文件夹名，只写要置顶的几个），或点控制条「⇅ 排序」当场调——
-//     浏览器不能写盘，调完点「复制」把 JSON 粘回该文件即可跨浏览器生效。
-//     角色文件夹是运行时读 ../data/ 的 HTTP 目录索引发现的；直接丢在
-//     data/ 根目录的 zip 仍按文件名前缀归入同名角色（兼容旧布局），
-//     服务器不返回目录索引时回退到内置 6 个角色 / 10 个造型。
-//     新放进 data/ 的造型标 NEW，打开过该角色面板即视为已读、角标消失（跨刷新记忆）；
-//     tab 横向溢出时滚轮、触控板横滑、Shift+滚轮都能左右浏览，
-//     滚动条刻意隐藏以保留 tab 的 41px 尺寸与间距。
-//     右侧「切换背景」旁边是「▲ 隐藏」：点一下收起整条；
-//       收起 → 鼠标移到页面顶端，右上角滑出「← 主页 ／ ▼ 显示控制条」。
-//  ② 「切换背景」：右侧预览面板，缩略图网格 + 大图预览，点击即应用，
-//     选择记入 localStorage。**零构建、零 Python、零清单、零预生成图片**：
-//       运行时直接读 background/ 的 HTTP 目录索引（Live Server /
-//       nginx autoindex 等静态服务都支持），文件名即元数据（分组 / 标签）；
-//       大预览统一 1280×720，页面 canvas 从原图现场裁一张（生成前用原图顶一下），
-//       结果存 IndexedDB：刷新/重启都还在，不必重新解码 3072×1728 原图；
-//       卡片另存 240×135 到 localStorage。全程不读写任何服务器文件，不发多余 404。
-//       新图丢进 background/ 后点「↻ 重新扫描」即可，不需要跑任何脚本。
-//       服务器不返回目录索引时，面板出现「导入文件夹」按钮，用浏览器选目录即可。
-//  ③ 与右侧「控制台」协调：控制台面板在 main.js 里从 top:56px 起，避开顶部控制条；
-//     背景面板右侧留 56px 给控制台竖条，两个面板互斥打开；ESC 按
-//     「背景面板 → 控制台 → 顶部控制条」逐层收起，不会一次触发好几个。
+//  控制条：默认固定展开。主页槽位 → 角色 tab（横向滚动）→ ⇅ 排序 /
+//  切换背景 / ▲ 隐藏；收起后鼠标移入页面顶端滑出「▼ 显示控制条」。
 //
-//  只做 UI，不碰 E-mote 渲染、canvas 与交互逻辑。
+//  数据来源：
+//    角色与造型  ../data/ 的目录索引，文件夹名即角色名，文件名即造型名。
+//                支持 *.zip 与裸 PSB（*.psb / *.psb.m / *.pure.psb）；
+//                目录索引不可用时用 localStorage 里的上次扫描结果兜底。
+//    tab 顺序    actions-config/order.json 的 roles，缺省按名字排。
+//    造型显示名  actions-config/<角色>/<词干>.json 的 name。
+//    背景        background/ 的目录索引，文件名推断分组与标签。
+//
+//  右侧面板四选一：造型 / 排序 / 背景 / 控制台，开一个收掉其余。
+//  ESC 逐层收起：排序 → 造型 → 背景 → 控制台 → 控制条。
+//
+//  写盘能力由 main.mjs 提供（响应头 X-Emote-Server: node），两个接口：
+//    PUT /api/order  调序后 300ms 防抖写回 actions-config/order.json
+//    PUT /api/thumb  背景生成 1280×720 缩略图写进 background/.thumbs/
+//  没有写盘接口时：排序只留本次会话，缩略图只读已有文件，界面照实提示。
+//
+//  只做 UI，不碰 E-mote 渲染与 canvas。
 // ============================================================
 (function () {
     'use strict';
 
-    // 模型 tab 不再是手写清单：运行时读 ../data/ 的 HTTP 目录索引，往目录里
-    // 丢文件就会自动出现；显示名一律由文件名推断，想单独改名就在
-    // actions-config/<角色>/<模型>.json 里写 "name"（见 modelNames）。
-    // 服务器不返回目录索引时用上次扫描落下的 file → path 索引兜底。
+    // 角色与造型来自 ../data/ 的目录索引：丢文件即出现，显示名由文件名推断；
+    // 要单独改名就写 actions-config/<角色>/<模型>.json 的 "name"。
     /* 裸 PSB（不压缩，直接把文件丢进角色文件夹，如 柳木詩夢/shi_45.pure.psb）。
        备选分支必须由长到短，否则 ".psb" 会抢先匹配、只剥掉一层后缀，
        剩下的 ".psb.m.pure" 会被当成造型名。 */
     var RAW_PSB_EXT = /\.(?:psb\.m\.pure\.psb|psb\.m\.pure|psb\.m\.psb|pure\.psb|psb\.m|psb|pure)$/i;
     var AUX_PSB_EXT = /\.resx\.psb$/i;             // 附属资源（图标 / 余项），不是可加载模型
     function isRawModel(name) { return !AUX_PSB_EXT.test(name) && RAW_PSB_EXT.test(name); }
-    /* data/ 里放的就是模型，所以**任何 .zip 都算**（内部只要有一个 .psb，
-       ModelLoader 就能按 magic 解出来）。这样 *.pure.zip / *.psb.zip /
-       *.psb.m.pure.zip 乃至以后的新命名都不用再改代码。 */
+    /* data/ 里的都是模型，所以任何 .zip 都算：内部含 .psb 即可，ModelLoader 按 magic 解压 */
     function isModelFile(name) {
         return /\.zip$/i.test(name) || isRawModel(name);
     }
@@ -66,12 +48,11 @@
     var MODEL_UNREAD_KEY = 'sg-models-unread-v1';  // 新增、但还没打开看过的造型路径
     var CONFIG_ROOT = '../actions-config/';        // 造型显示名 / 角色顺序的可选来源
     var modelNames = {};           // '<角色>/<词干>' → 配置 JSON 里的 name（造型显示名）
-    /* 角色 tab 顺序：order.json 的 roles 是权威（只写要置顶的，其余自动追加）；
-       「⇅ 排序」面板改的是本地草稿，存 localStorage，带 order.json 指纹——
-       文件一改，指纹对不上，草稿自动作废，不会出现「改了文件没反应」。 */
-    var roleOrder = [];            // 生效顺序（order.json 或本地草稿）
-    var roleOrderSource = [];      // order.json 里的原始 roles，草稿指纹用它比对
-    var ROLE_ORDER_KEY = 'sg-role-order-v1';
+    /* 角色 tab 顺序：只认 actions-config/order.json（写文件夹名，其余自动追加）。
+       面板里调完自动写回文件；文件没有就退回纯自动序。 */
+    var roleOrder = [];            // 生效顺序（order.json 的 roles + 还没写盘的调整）
+    var roleOrderSource = [];      // 文件里的原始 roles，「重置」和未保存判定用它
+    var orderDirty = false;        // 有还没写回文件的调整
 
     var groups = [];               // 角色组（tab 数据）：{ folder, label, models, isNew }
     var models = [];               // 全部造型的扁平列表，保持 SGSceneUI.models 旧契约
@@ -88,8 +69,7 @@
     ];
 
     var IMG_EXTS = /\.(png|jpe?g|webp|gif|bmp)$/i;
-    // 浏览器自己维护的两份状态：卡片小图缓存、上次扫描到的文件名（用来标 NEW）
-    var THUMB_KEY = 'sg-bg-cards-v1';
+    // 上次扫描到的文件名（用来标 NEW）；缩略图不放浏览器，全部落盘 background/.thumbs/
     var KNOWN_KEY = 'sg-bg-known-v1';
 
     var CSS = [
@@ -105,8 +85,8 @@
         'body.sg-bar-pinned #sg-hot{pointer-events:none}',
         'body.sg-bar-pinned #sg-hot::after{opacity:0}',
 
-        // ---- 收起时右上角原位滑出的提示条：主页入口 + 显示控制条 ----
-        // 主页主体已并入控制条（见 .sg-home-tab）；这里只在收起态补一个轻量入口
+        // ---- 收起时右上角滑出的提示条：主页入口 + 显示控制条 ----
+        // 主页按钮已在控制条里（.sg-home-tab），这里只补收起态的入口
         '#sg-peek{position:absolute;right:16px;top:0;z-index:3;height:36px;',
         ' display:flex;align-items:center;gap:8px;padding:0 14px;',
         ' border:1px solid rgba(99,214,196,.45);border-top:0;',
@@ -141,14 +121,13 @@
         '#sg-models{flex:1;min-width:0;display:flex;align-items:stretch;gap:6px;',
         ' overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;',
         ' scrollbar-width:none;height:100%;padding:7px 0}',
-        // 滚轮 / 触控板横滑已能浏览，隐藏横向滚动条：它原本会吃掉 11px 高度，
-        // 把 tab 从旧版的 41px 压成 31px。隐藏后高度与间距都能完整还原。
+        // 滚轮 / 触控板横滑已能浏览，所以隐藏横向滚动条：它吃掉 11px 高度，
+        // 会把 tab 从 41px 压到 31px。
         '#sg-models::-webkit-scrollbar{display:none}',
         // 主页按钮与角色 tab 共用同一套尺寸规则（同一个选择器组），但分处不同容器；
         // 不带 .sg-model 类名，避免被「按 .sg-model 取模型」的逻辑误当成一个模型。
-        // 尺寸沿用旧版：padding 4px 12px / 行距 3px / 字号 12、10；
-        // 只把 min-width 换成定宽 width，保证 19 个 tab 与主页严格等宽，
-        // 并保留 b/i 的 flex:none + 省略号，避免长副标撑破或被压成 0 高。
+        // 定宽 width 保证每个 tab 与主页严格等宽，b/i 用 flex:none + 省略号，
+        // 避免长副标撑破或被压成 0 高。
         '.sg-model,.sg-home-tab{flex:none;width:96px;height:100%;padding:4px 12px;',
         ' box-sizing:border-box;overflow:hidden;position:relative;',
         ' display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;',
@@ -187,7 +166,7 @@
         '.sg-tool:hover{background:#1d3540;border-color:rgba(99,214,196,.5)}',
         '.sg-tool.is-on{background:#173b36;border-color:#63d6c4;color:#a9f0e3}',
         '.sg-tool small{display:block;margin-top:2px;font-size:9px;opacity:.65;letter-spacing:.08em}',
-        // 隐藏／显示：与「切换背景」同规格、紧挨着放，不再是左上角那块悬空大按钮
+        // 隐藏／显示：与「切换背景」同规格，紧挨着放在控制条右端
         '#sg-hint{min-width:80px;color:#a9f0e3;border-color:rgba(99,214,196,.34)}',
         '#sg-hint:hover{border-color:#63d6c4}',
         '#sg-hint small{color:#7c959a}',
@@ -232,7 +211,7 @@
 
         // ---- 角色顺序面板：控制条「⇅ 排序」打开，↑↓ 调 tab ----
         '#sg-sort-toggle{min-width:74px}',
-        '#sg-sort-panel{position:fixed;top:60px;left:16px;width:min(268px,92vw);',
+        '#sg-sort-panel{position:fixed;top:60px;right:16px;left:auto;width:min(268px,92vw);',
         ' max-height:min(72vh,600px);z-index:85;display:none;flex-direction:column;',
         ' background:#0b1419;border:1px solid rgba(233,185,110,.45);border-radius:6px;',
         ' box-shadow:0 14px 38px rgba(0,0,0,.62);overflow:hidden;',
@@ -242,9 +221,11 @@
         ' border-bottom:1px solid rgba(233,185,110,.24);background:#1a1710}',
         '#sg-sp-head b{flex:1;font-size:12px;font-weight:600;letter-spacing:.04em;color:#f6e4c4;',
         ' overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-        '#sg-sp-close{flex:none;height:26px;padding:0 9px;border:1px solid rgba(255,255,255,.18);',
+        '#sg-sp-head button{flex:none;height:26px;padding:0 9px;border:1px solid rgba(255,255,255,.18);',
         ' border-radius:4px;background:#14242b;color:#e6f1ef;cursor:pointer;font-size:11px}',
-        '#sg-sp-close:hover{background:#1d3540}',
+        '#sg-sp-head button:hover{background:#1d3540}',
+        '#sg-sp-reset{color:#a9c6c2}',
+        '#sg-sp-reset:disabled{opacity:.4;cursor:default}',
         '#sg-sp-list{flex:1;min-height:0;overflow-y:auto;padding:8px;',
         ' display:flex;flex-direction:column;gap:5px;scrollbar-width:thin;',
         ' scrollbar-color:rgba(233,185,110,.35) transparent}',
@@ -268,12 +249,11 @@
         ' border-radius:4px;background:#14242b;color:#cfe0dd;cursor:pointer;font-size:11px;line-height:1}',
         '.sg-sp-mv:hover{background:#1d3540;border-color:rgba(99,214,196,.5)}',
         '.sg-sp-mv:disabled{opacity:.28;cursor:default}',
-        '#sg-sp-foot{flex:none;display:flex;gap:6px;padding:8px 10px;',
-        ' border-top:1px solid rgba(233,185,110,.18)}',
-        '#sg-sp-foot button{flex:1;height:28px;border:1px solid rgba(255,255,255,.16);',
-        ' border-radius:4px;background:#14242b;color:#e6f1ef;cursor:pointer;font-size:11px}',
-        '#sg-sp-foot button:hover{background:#1d3540}',
         '#sg-sp-tip{flex:none;padding:0 10px 9px;font-size:10px;line-height:1.5;color:#7c959a}',
+        '#sg-sp-tip-path{margin-top:4px;padding:3px 5px;border:1px solid rgba(99,214,196,.16);',
+        ' border-radius:3px;background:#0f1b21;font:9.5px/1.45 ui-monospace,Consolas,monospace;',
+        ' color:#6f8b91;white-space:nowrap;overflow:hidden;user-select:all}',
+        '#sg-sp-tip-path b{color:#8fd8cd;font-weight:600}',
 
         // ---- 背景预览面板 ----
         // 右侧留 56px 给「控制台」竖条（收起态贴屏幕右缘），别把它压在面板底下
@@ -352,7 +332,7 @@
     ].join('\n');
 
     var top, hot, home, homeSlot, peek, peekHome, hint, bar, modelsEl, bgToggle, bgCloseBtn;
-    var sortToggle, sortPanel, sortListEl, sortTipEl, sortCopyBtn, sortResetBtn;
+    var sortToggle, sortPanel, sortListEl, sortTipEl, sortTipMsg, sortTipPathEl, sortResetBtn;
     // 拖拽排序：dragRow 是被拖的那一行（留在列表里当占位），dragGhost 跟着指针走
     var dragRow = null, dragGhost = null, dragStartY = 0, dragOffset = 0, dragMoved = false;
     var panel, grid, previewImg, previewLabel, currentLabel;
@@ -360,9 +340,12 @@
     var pinned = false, bgOpen = false;
     var items = [], currentBg = 'background.jpg', currentModel = '';
     var scanSeq = 0, newCount = 0, directoryOk = false, manualCount = 0;
-    var thumbCache = {}, manualItems = [], knownFiles = null;
-    // hiThumbs：720p 预览缓存（IndexedDB 载入 + 现场生成），刷新后仍在
-    var hiThumbs = {}, hiPending = {}, previewFile = '';
+    var thumbAvail = {}, manualItems = [], knownFiles = null;
+    // 磁盘缩略图：background/.thumbs/<原名去扩展名>.jpg（1280×720）
+    // 页面生成一次 → 经本地服务落盘 → 之后所有卡片和预览都读这张小图
+    var thumbState = {}, thumbQueue = [], thumbBusy = false, thumbReady = {};
+    var thumbServer = null;          // null 未知 / true 可写盘 / false 只能读现有文件
+    var previewFile = '';
 
     function el(tag, id, cls) {
         var n = document.createElement(tag);
@@ -418,8 +401,14 @@
     function fetchIndex(url) {
         return fetch(url + (url.indexOf('?') < 0 ? '?t=' : '&t=') + Date.now(),
                      { cache: 'no-store' })
-            .then(function (r) { return r.ok ? r.text() : null; })
-            .catch(function () { return null; });
+            .then(function (r) {
+                // 本地 node 服务（main.mjs）会带这个头：说明 /api/order 在，
+                // 排序改动可以自动写盘；没有这个头就是普通静态服务，只能改内存
+                if (r.headers.get('x-emote-server') === 'node') setOrderServer(true);
+                else setOrderServer(false);
+                return r.ok ? r.text() : null;
+            })
+            .catch(function () { setOrderServer(false); return null; });
     }
 
     function parseIndex(text) {
@@ -496,7 +485,11 @@
             if (!has) return null;
             return fetch(CONFIG_ROOT + 'order.json', { cache: 'no-store' })
                 .then(function (r) { return r.ok ? r.json() : null; })
-                .catch(function () { return null; })
+                .catch(function () {
+                    // 手改坏了（缺逗号、尾逗号）在这里几乎无声，给一条可查的线索
+                    console.warn('[Sort] actions-config/order.json 不是合法 JSON，本轮退回自动顺序');
+                    return null;
+                })
                 .then(function (cfg) {
                     if (!cfg || !Array.isArray(cfg.roles)) return null;
                     return cfg.roles.filter(function (s) {
@@ -506,31 +499,8 @@
         }).catch(function () { return null; });
     }
 
-    function sameList(a, b) {
-        if (!a || !b || a.length !== b.length) return false;
-        for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-        return true;
-    }
-
-    /* 本地草稿：{ base: order.json 里原样的 roles, roles: 调好的全量顺序 }。
-       base 与当前文件一致才生效——文件一改草稿就作废，不会出现双源打架。 */
-    function readRoleDraft() {
-        try {
-            var o = JSON.parse(localStorage.getItem(ROLE_ORDER_KEY));
-            if (!o || !Array.isArray(o.roles) || !Array.isArray(o.base)) return null;
-            return o;
-        } catch (_) { return null; }
-    }
-    function writeRoleDraft(roles) {
-        try {
-            localStorage.setItem(ROLE_ORDER_KEY, JSON.stringify({
-                base: roleOrderSource, roles: roles
-            }));
-        } catch (_) { /* 隐私模式：本次会话内仍然生效 */ }
-    }
-    function clearRoleDraft() {
-        try { localStorage.removeItem(ROLE_ORDER_KEY); } catch (_) {}
-    }
+    /* 顺序只以 actions-config/order.json 为准：调完自动写回文件，刷新后按文件重建。
+       不在浏览器里留任何副本，因此不存在两份顺序打架。 */
 
     function nameKey(file, folder) {
         return (folder ? folder + '/' : '') + stripModelExt(file);
@@ -771,13 +741,12 @@
         // 顺序和目录一起拿：tab 一次成型，不会先按默认序渲染再当场跳一下
         return Promise.all([fetchModelTree(), fetchModelOrder()]).then(function (res) {
             var tree = res[0];
-            /* order.json 是权威；本地草稿只在指纹（base）仍匹配时覆盖它 */
-            if (res[1]) {
-                roleOrderSource = res[1];
-                var draft = readRoleDraft();
-                roleOrder = (draft && sameList(draft.base, roleOrderSource))
-                    ? draft.roles : roleOrderSource;
-            }
+            // order.json 是唯一来源：文件没有就退回纯自动序
+            roleOrderSource = res[1] || [];
+            /* 「重置」回到的是页面打开时的那份顺序，只记第一次，后面重扫不改它 */
+            if (!orderBaseline.length) orderBaseline = roleOrderSource.slice();
+            /* 切窗口回来会触发重扫；有未保存的调整时保留它，别把刚拖好的顺序冲掉 */
+            if (!orderDirty) roleOrder = roleOrderSource.slice();
             var list = buildGroups(tree || builtinTree());
             modelSource = tree ? 'http-directory' : 'builtin';
             // NEW 以「角色/文件名」为单位：没见过、且还没打开看过的才算新
@@ -797,7 +766,7 @@
                 paths.forEach(function (p) { if (!seen[p]) unread[p] = true; });
             }
             // 确认目录索引可读时，才把已删掉的造型从未读表里清掉；
-            // 回退内置清单的那一轮不做清理，免得误删未读标记
+            // 回退到本地索引的那一轮不做清理，免得误删未读标记
             if (modelSource === 'http-directory') {
                 Object.keys(unread).forEach(function (p) {
                     if (paths.indexOf(p) < 0) delete unread[p];
@@ -820,6 +789,7 @@
             renderModelTabs();
             if (modelPanelOpen) renderModelPanel();
             if (sortOpen) renderSortPanel();
+            syncSortFoot();                          // 「重置」是否可点，取决于当前序 vs 打开时
             refreshModelNames();                     // 配置里的 name 回来后原地换显示名
             return modelSource;
         });
@@ -919,42 +889,66 @@
     }
 
     /* ---- 角色顺序面板（控制条「⇅ 排序」）----
-       只改 roleOrder：即时重排 tab、写 localStorage 草稿；
-       想固化就「复制 order.json」再粘回文件——浏览器不能写盘，这是零授权的边界。 */
+       调序立刻重排 tab，并在 300ms 防抖后自动写回 order.json，没有保存按钮。
+       只有 main.mjs 起的服务带写盘接口（响应头里有 X-Emote-Server）；
+       没有服务时顺序只留在本次会话，提示会直说，不假装保存成功。 */
+    var ORDER_REL = 'steins-gate-lab-stage/actions-config/order.json';
+    var ORDER_API = '../api/order';
+    var orderServer = null;          // null = 还没遇到 node 服务；true = 有写盘接口
+    var orderSaving = false;
+    var orderSaveTimer = 0;
+    var orderFailCount = 0;
+
+    function setOrderServer(on) {
+        if (orderServer === on) return;
+        orderServer = on;
+        if (!orderDirty) syncSortTip();
+        if (on && orderDirty) scheduleAutoSave();   // 服务晚一步才被认出来时补存一次
+    }
+
+    function sortTipBase() {
+        if (orderServer === true) return '拖动 ⠿ 或点 ↑↓ 调整，松手自动写入文件';
+        if (orderServer === false) {
+            return '未连接本地服务：顺序只在本次浏览有效，用 run.bat 打开才能写盘';
+        }
+        return '拖动 ⠿ 或点 ↑↓ 调整，松手自动保存';
+    }
+
     function buildSortPanel() {
         sortPanel = el('div', 'sg-sort-panel');
         sortPanel.setAttribute('aria-hidden', 'true');
 
         var head = el('div', 'sg-sp-head');
         var title = el('b'); title.textContent = '角色顺序';
+        sortResetBtn = el('button', 'sg-sp-reset');
+        sortResetBtn.type = 'button';
+        sortResetBtn.textContent = '重置';
+        sortResetBtn.title = '放弃本次调整，回到 order.json 里的顺序';
+        sortResetBtn.addEventListener('click', function (e) { e.stopPropagation(); resetRoleOrder(); });
         var close = el('button', 'sg-sp-close');
         close.type = 'button'; close.textContent = '关闭';
         close.title = '关闭排序面板';
         close.addEventListener('click', function (e) { e.stopPropagation(); setSortOpen(false); });
-        head.appendChild(title); head.appendChild(close);
+        head.appendChild(title); head.appendChild(sortResetBtn); head.appendChild(close);
 
         sortListEl = el('div', 'sg-sp-list');
 
-        var foot = el('div', 'sg-sp-foot');
-        sortCopyBtn = el('button');
-        sortCopyBtn.type = 'button';
-        sortCopyBtn.textContent = '复制 order.json';
-        sortCopyBtn.title = '把当前顺序复制成 JSON，粘进 actions-config/order.json 即跨浏览器生效';
-        sortCopyBtn.addEventListener('click', function (e) { e.stopPropagation(); copyRoleOrder(); });
-        sortResetBtn = el('button');
-        sortResetBtn.type = 'button';
-        sortResetBtn.textContent = '重置';
-        sortResetBtn.title = '清掉本地草稿，回到 order.json 的顺序';
-        sortResetBtn.addEventListener('click', function (e) { e.stopPropagation(); resetRoleOrder(); });
-        foot.appendChild(sortCopyBtn); foot.appendChild(sortResetBtn);
-
         sortTipEl = el('div', 'sg-sp-tip');
-        sortTipEl.textContent = '拖动左侧 ⠿ 或用 ↑↓ 调整顺序，即时生效并存本地；点「复制」粘进 '
-            + 'actions-config/order.json 可跨浏览器保留';
+        sortTipMsg = el('div', 'sg-sp-tip-msg');
+        sortTipMsg.textContent = sortTipBase();
+        sortTipPathEl = el('div', 'sg-sp-tip-path');
+        sortTipPathEl.title = '每次调序后自动写入这个文件，不需要点保存';
+        /* 拆两行写，别让 268px 的窄面板把文件名断在中间 */
+        sortTipPathEl.appendChild(document.createTextNode('自动保存到 steins-gate-lab-stage/'));
+        sortTipPathEl.appendChild(el('br'));
+        var pathFile = el('b'); pathFile.textContent = 'actions-config/order.json';
+        sortTipPathEl.appendChild(pathFile);
+        sortTipEl.appendChild(sortTipMsg);
+        sortTipEl.appendChild(sortTipPathEl);
+        syncSortTip();
 
         sortPanel.appendChild(head);
         sortPanel.appendChild(sortListEl);
-        sortPanel.appendChild(foot);
         sortPanel.appendChild(sortTipEl);
         document.body.appendChild(sortPanel);
         sortPanel.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
@@ -1010,11 +1004,11 @@
         if (i < 0 || j < 0 || j >= names.length) return;
         var tmp = names[i]; names[i] = names[j]; names[j] = tmp;
         roleOrder = names;
-        writeRoleDraft(roleOrder);
         applyRoleOrder();
+        afterOrderChange();
     }
 
-    /* ---- 拖拽排序：把手起手，DOM 边拖边换位，松手才写草稿 ----
+    /* ---- 拖拽排序：把手起手，DOM 边拖边换位，松手才落库 ----
        不用 setPointerCapture（合成事件会抛 NotFoundError），改挂 document 级监听；
        列表行是等高的，用「指针越过某行中线就插到它前面」判断落点。 */
     function beginDrag(e, row) {
@@ -1088,8 +1082,8 @@
         if (!dragMoved) return;                  // 只是点了一下把手，顺序没动
         var names = [].slice.call(sortListEl.children).map(function (n) { return n.dataset.folder; });
         roleOrder = names;
-        writeRoleDraft(roleOrder);
         applyRoleOrder();
+        afterOrderChange();
     }
 
     function applyRoleOrder() {
@@ -1100,32 +1094,137 @@
         renderSortPanel();
     }
 
-    function copyRoleOrder() {
-        var text = JSON.stringify({ roles: currentRoleNames() }, null, 2);
-        var done = function () {
-            sortCopyBtn.textContent = '已复制 ✓';
-            setTimeout(function () {
-                if (sortCopyBtn) sortCopyBtn.textContent = '复制 order.json';
-            }, 1400);
-        };
-        var fallback = function () {
-            var ta = el('textarea');
-            ta.value = text;
-            ta.style.cssText = 'position:fixed;left:-9999px;top:0';
-            document.body.appendChild(ta); ta.select();
-            try { document.execCommand('copy'); done(); } catch (_) {}
-            document.body.removeChild(ta);
-        };
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(done, fallback);
-        } else fallback();
+    /* ---- 自动写盘：只有本地服务能写，浏览器里不留副本 ----
+       拖完 / ▲▼ 之后 300ms 防抖，一次 PUT 落到 actions-config/order.json。
+       没连上服务时不动文件，只在提示里说明——绝不假装保存成功。 */
+    var sortTipTimer = 0;
+    var orderSeq = 0;                // 每次调序 +1，用来识别「写盘期间又动了」
+    var orderBaseline = [];          // 打开页面时的顺序，「重置」回到这里
+
+    function putOrderRoles(text) {
+        return fetch(ORDER_API, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: text
+        }).then(function (r) {
+            return r.json().catch(function () { return {}; }).then(function (body) {
+                if (!r.ok || !body || body.ok !== true) {
+                    throw new Error((body && body.error) || ('HTTP ' + r.status));
+                }
+                return body;
+            });
+        });
     }
 
-    /* 重置：清本地草稿，回到 order.json 的顺序（文件也没写就回到纯自动序） */
+    function scheduleAutoSave() {
+        if (orderServer !== true) { syncSortTip(); return; }   // 没服务：只提示，不做假动作
+        clearTimeout(orderSaveTimer);
+        orderSaveTimer = setTimeout(saveOrderNow, 300);
+    }
+
+    function saveOrderNow() {
+        clearTimeout(orderSaveTimer);
+        if (orderServer !== true || !orderDirty) return Promise.resolve(false);
+        if (orderSaving) {                 // 上一笔还没写完：等它写完再补一次
+            orderSaveTimer = setTimeout(saveOrderNow, 150);
+            return Promise.resolve(false);
+        }
+        var sent = roleOrder.slice();      // 这一笔写的到底是哪份顺序
+        var seq = orderSeq;
+        orderSaving = true;
+        syncSortTip('正在保存…');
+        return putOrderRoles(JSON.stringify({ roles: sent }, null, 2) + '\n').then(function (info) {
+            orderSaving = false;
+            orderFailCount = 0;
+            roleOrderSource = sent;        // 服务端刚写下的就是这一份
+            syncSortFoot();
+            if (seq === orderSeq) {
+                orderDirty = false;
+                syncSortTip('已保存 · ' + (info.count || 0) + ' 个角色');
+            } else {
+                orderSaveTimer = setTimeout(saveOrderNow, 120);   // 写盘期间又动了，接着存
+            }
+            return true;
+        }).catch(function (err) {
+            orderSaving = false;
+            orderFailCount++;
+            console.warn('[Sort] 自动保存失败:', (err && err.message) || err);
+            /* 偶发（服务刚重启）重试两次；连续失败就停手，别把控制台刷满 */
+            if (orderFailCount <= 2) {
+                syncSortTip('保存失败，正在重试…');
+                orderSaveTimer = setTimeout(saveOrderNow, 1200);
+            } else {
+                syncSortTip('保存失败：' + ((err && err.message) || '连接中断') +
+                    '（顺序还在，重开 run.bat 后再动一下就会补存）');
+            }
+            return false;
+        });
+    }
+
+    function syncSortFoot() {
+        if (!sortResetBtn) return;
+        var same = roleOrder.join('\u0000') === orderBaseline.join('\u0000');
+        sortResetBtn.disabled = !orderBaseline.length || same;
+        sortResetBtn.title = same
+            ? '当前顺序就是打开页面时的那份'
+            : '回到打开页面时的顺序（会一并写回 order.json）';
+    }
+
+    /* extra 是临时提示（保存中 / 已保存 / 已还原），两秒后退回常驻说明；
+       路径那一行常显，不参与轮换 */
+    function syncSortTip(extra) {
+        if (!sortTipEl || !sortTipMsg) return;
+        clearTimeout(sortTipTimer);
+        sortTipMsg.textContent = extra || sortTipBase();
+        if (!extra) return;
+        sortTipTimer = setTimeout(function () { if (sortTipMsg) syncSortTip(); }, 2000);
+    }
+
+    /* 每次调序后：重排已由调用方做完，这里只管标脏 + 排队写盘 */
+    function afterOrderChange() {
+        orderDirty = true;
+        orderSeq++;
+        syncSortFoot();
+        syncSortTip();
+        scheduleAutoSave();
+    }
+
+    /* 重置：回到打开页面时的那份顺序；有写盘能力时顺手把这一份也写回去
+       （说不定上一笔 PUT 还在飞，写完才算两边一致） */
     function resetRoleOrder() {
-        clearRoleDraft();
-        roleOrder = roleOrderSource.slice();
+        clearTimeout(orderSaveTimer);
+        if (!orderBaseline.length) return;
+        roleOrder = orderBaseline.slice();
         applyRoleOrder();
+        if (orderServer === true) {
+            orderDirty = true;
+            orderSeq++;
+            syncSortFoot();
+            syncSortTip('已还原，正在写回文件…');
+            saveOrderNow();
+        } else {
+            orderDirty = false;
+            syncSortFoot();
+            syncSortTip('已还原到 order.json 的顺序');
+        }
+    }
+
+    /* 面板贴窗口右侧、右边缘与「⇅ 排序」按钮对齐：按按钮实测位置算 right，
+       窗口缩放时重算；窄屏（≤720px）改成通栏贴边，免得挤出屏幕。 */
+    function positionSortPanel() {
+        if (!sortPanel || !sortToggle || !bar) return;
+        var btn = sortToggle.getBoundingClientRect();
+        var barBox = bar.getBoundingClientRect();
+        sortPanel.style.top = Math.round(barBox.bottom + 8) + 'px';
+        if (window.innerWidth <= 720) {
+            sortPanel.style.left = '8px';
+            sortPanel.style.right = '8px';
+            sortPanel.style.width = 'auto';
+        } else {
+            sortPanel.style.left = 'auto';
+            sortPanel.style.right = Math.max(8, Math.round(window.innerWidth - btn.right)) + 'px';
+            sortPanel.style.width = '';
+        }
     }
 
     function setSortOpen(v) {
@@ -1138,10 +1237,12 @@
             sortToggle.setAttribute('aria-expanded', String(sortOpen));
         }
         if (sortOpen) {
-            setBgOpen(false);            // 三块面板同屏只留一块
+            setBgOpen(false);            // 右侧面板同屏只留一块
             setModelPanelOpen(false);
+            closeDevPanel();             // 控制台也占右侧，一起收掉
             setPinned(true);
             renderSortPanel();
+            positionSortPanel();
         }
     }
 
@@ -1153,6 +1254,7 @@
         document.body.classList.toggle('sg-mp-open', modelPanelOpen);
         if (modelPanel) modelPanel.setAttribute('aria-hidden', String(!modelPanelOpen));
         if (modelPanelOpen && bgOpen) setBgOpen(false);   // 右侧只留一块面板
+        if (modelPanelOpen && sortOpen) setSortOpen(false);
         if (modelPanelOpen) setPinned(true);
         if (modelsEl) {
             Array.prototype.forEach.call(modelsEl.querySelectorAll('.sg-model'), function (b) {
@@ -1220,10 +1322,19 @@
 
     function bgUrl(file) { return 'background/' + encodeURIComponent(file); }
 
-    // 预览唯一入口：720p 缓存 → 原图（生成前顶一下）。
-    // 大预览、卡片、backgrounds() 都走这里，不读写任何服务器文件。
+    function stemOf(file) { return file.replace(/\.[^.]+$/, ''); }
+
+    /* 磁盘缩略图地址：有就返回它，没有返回 null（调用方回退原图） */
+    function thumbUrlOf(file) {
+        var s = stemOf(file);
+        return thumbAvail[s] ? THUMB_DIR + encodeURIComponent(s) + '.jpg' : null;
+    }
+
+    // 预览唯一入口：手动导入的 blob → 磁盘 720p 缩略图 → 原图
+    // 大预览、卡片、backgrounds() 都走这里，浏览器里不缓存第二份
     function previewOf(it) {
-        return it.blob || hiThumbs[it.file] || bgUrl(it.file);
+        if (it.blob) return it.blob;
+        return thumbUrlOf(it.file) || bgUrl(it.file);
     }
 
     function applyBg(file, persist) {
@@ -1247,25 +1358,31 @@
         return null;
     }
 
-    // 大预览走 previewOf：先用原图顶一下，IndexedDB 载入完若命中就直接换上，
-    // 否则现场生成 720p 再换（异步回调只对当前这张生效，不串到别的 hover）
+    /* 悬停防抖：鼠标快速划过一排卡片时不真的去解码，停住 120ms 才换预览。
+       换的时候优先用磁盘缩略图；还没有就先用原图顶着，同时排队生成，
+       生成完由 refreshThumbUsers() 换成小图。 */
+    var hoverTimer = 0, hoverSeq = 0;
     function showPreview(item) {
         if (!item) return;
-        previewFile = item.file;
-        previewImg.src = previewOf(item);
-        if (!item.blob && !hiThumbs[item.file]) {
-            loadHi().then(function () {
-                if (previewFile !== item.file) return;
-                if (hiThumbs[item.file]) { previewImg.src = hiThumbs[item.file]; return; }
-                ensureHi(item, function (src) {
-                    if (previewFile === item.file) previewImg.src = src;
-                });
-            });
-        }
-        previewLabel.textContent = item.label + '  ·  ' + item.groupLabel;
+        var seq = ++hoverSeq;
+        clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(function () {
+            if (seq === hoverSeq) paintPreview(item);
+        }, 120);
     }
 
-    // 右侧同一时间只放一个面板：背景预览与「控制台」互斥，避免两块叠在一起
+    function paintPreview(item) {
+        previewFile = item.file;
+        previewImg.src = previewOf(item);
+        previewLabel.textContent = item.label + '  ·  ' + item.groupLabel;
+        if (item.blob || thumbUrlOf(item.file)) return;
+        var s = stemOf(item.file);
+        if (thumbState[s] === 'saving' || thumbState[s] === 'done') return;
+        if (thumbQueue.indexOf(item.file) < 0) thumbQueue.unshift(item.file);   // 悬停的这张优先补
+        pumpThumbs();
+    }
+
+    // 右侧同一时间只放一块面板：造型 / 排序 / 背景 / 控制台，开一个收其余
     function devPanelOpen() {
         try { return !!(window.getDevPanel && window.getDevPanel().open); }
         catch (_) { return false; }
@@ -1289,7 +1406,7 @@
         panel.classList.toggle('is-open', v);
         panel.setAttribute('aria-hidden', String(!v));
         bgToggle.classList.toggle('is-on', v);
-        if (v) { closeDevPanel(); setModelPanelOpen(false); setPinned(true); loadBackgrounds(); }
+        if (v) { closeDevPanel(); setSortOpen(false); setModelPanelOpen(false); setPinned(true); loadBackgrounds(); }
     }
 
     /* 没有清单、没有构建步骤：文件名本身就是元数据。 */
@@ -1308,88 +1425,42 @@
                  group: 'scene', groupLabel: '场景背景' };
     }
 
-    /* 720p 预览缓存：IndexedDB 持久化，刷新/重启后仍在，零授权、不写服务器文件。
-       浏览器禁用 IDB（隐私模式等）时静默退回纯内存，主流程不受影响。 */
-    var HI_DB = 'sg-bg', HI_STORE = 'previews', hiOpened = null, hiLoaded = null;
-    function openHi() {
-        if (hiOpened) return hiOpened;
-        hiOpened = new Promise(function (resolve) {
-            if (!window.indexedDB) { resolve(null); return; }
-            var req;
-            try { req = indexedDB.open(HI_DB, 1); }
-            catch (_) { resolve(null); return; }
-            req.onupgradeneeded = function () {
-                var db = req.result;
-                if (!db.objectStoreNames.contains(HI_STORE)) db.createObjectStore(HI_STORE);
-            };
-            req.onsuccess = function () { resolve(req.result); };
-            req.onerror = function () { resolve(null); };
-            req.onblocked = function () { resolve(null); };
-        });
-        return hiOpened;
-    }
-    /* 启动时一次读出全部缓存填进 hiThumbs；loadBackgrounds 会等它完成再渲染，
-       避免首屏先闪一下原图。同名图片被替换时可调 clearHiCache() 清空。 */
-    function loadHi() {
-        if (!hiLoaded) hiLoaded = openHi().then(function (db) {
-            if (!db) return;
-            return new Promise(function (resolve) {
-                var req;
-                try { req = db.transaction(HI_STORE, 'readonly').objectStore(HI_STORE).openCursor(); }
-                catch (_) { resolve(); return; }
-                req.onsuccess = function () {
-                    var cur = req.result;
-                    if (!cur) { resolve(); return; }
-                    if (!hiThumbs[cur.key]) hiThumbs[cur.key] = cur.value;
-                    cur.continue();
-                };
-                req.onerror = function () { resolve(); };
-            });
-        });
-        return hiLoaded;
-    }
-    function putHi(file, data) {
-        openHi().then(function (db) {
-            if (!db) return;
-            try { db.transaction(HI_STORE, 'readwrite').objectStore(HI_STORE).put(data, file); }
-            catch (_) {}
-        });
-    }
-    function clearHi() {
-        hiThumbs = {};
-        return openHi().then(function (db) {
-            if (!db) return;
-            try { db.transaction(HI_STORE, 'readwrite').objectStore(HI_STORE).clear(); }
-            catch (_) {}
-        });
+    /* ---- 磁盘缩略图：生成一次 → 落盘 → 之后只读小图 ----
+       main.mjs 提供 GET /api/thumbs（已有清单）与 PUT /api/thumb?name=原图名。
+       没有写盘接口（非 main.mjs 起的静态服务）时只读已有文件，不生成。 */
+    var THUMB_DIR = 'background/.thumbs/';
+    var THUMB_PUT = '../api/thumb';
+    var THUMB_W = 1280, THUMB_H = 720, THUMB_Q = 0.9;
+
+    function thumbNameList(text) {
+        var out = [], m, re = /href\s*=\s*["']([^"']+)["']/gi;
+        while ((m = re.exec(text || ''))) {
+            var raw = m[1].split(/[?#]/)[0];
+            if (!raw || /\/$/.test(raw)) continue;
+            var f;
+            try { f = decodeURIComponent(raw); } catch (_) { f = raw; }
+            f = f.replace(/^.*\//, '');
+            if (/\.jpe?g$/i.test(f)) out.push(f.replace(/\.[^.]+$/, ''));
+        }
+        return out;
     }
 
-    /* 缩略图缓存：内存 + localStorage，刷新后仍在，不写任何服务器文件。 */
-    function loadThumbCache() {
-        try {
-            var raw = localStorage.getItem(THUMB_KEY);
-            thumbCache = raw ? (JSON.parse(raw) || {}) : {};
-        } catch (_) { thumbCache = {}; }
-    }
-    var thumbSaveTimer = 0;
-    function saveThumbCache() {
-        clearTimeout(thumbSaveTimer);
-        thumbSaveTimer = setTimeout(function () {
-            try { localStorage.setItem(THUMB_KEY, JSON.stringify(thumbCache)); }
-            catch (_) {
-                // 配额满就丢一半，绝不影响主流程
-                var keys = Object.keys(thumbCache);
-                keys.slice(0, Math.ceil(keys.length / 2)).forEach(function (k) {
-                    delete thumbCache[k];
-                });
-                try { localStorage.setItem(THUMB_KEY, JSON.stringify(thumbCache)); } catch (_) {}
-            }
-        }, 600);
+    /* 已有缩略图清单：直接读 .thumbs/ 的目录索引（node 与纯静态服务都支持），
+       顺带从响应头判断有没有写盘能力——一个请求解决两件事，不额外探 404。 */
+    function loadThumbIndex() {
+        return fetch(THUMB_DIR + '?t=' + Date.now(), { cache: 'no-store' })
+            .then(function (r) {
+                thumbServer = r.headers.get('x-emote-server') === 'node';
+                return r.ok ? r.text() : '';
+            })
+            .then(function (text) {
+                thumbNameList(text).forEach(function (s) { thumbAvail[s] = true; });
+            })
+            .catch(function () { thumbServer = false; });
     }
 
-    /* 用已加载的原图在 canvas 上裁一张 cover 缩略图：默认 240×135 给卡片，
-       传 1280×720 就是大预览用的高清图。
-       同源 HTTP / blob URL 都不会污染 canvas；失败就静默继续用原图。 */
+    /* 把已解码的原图裁成 cover 尺寸的 JPEG dataURL（实际只用于 1280×720 缩略图）。
+       同源 HTTP / blob URL 都不污染 canvas；失败返回 null，调用方回退原图。 */
     function makeThumb(img, w, h, q) {
         try {
             w = w || 240; h = h || 135; q = q || 0.72;
@@ -1403,31 +1474,103 @@
         } catch (_) { return null; }
     }
 
-    /* 缓存未命中的图：后台解码一次原图，生成 1280×720 并写进 IndexedDB。
-       每张只生成一次，之后刷新/重启都不必再解码原图。 */
-    function ensureHi(it, done) {
-        if (hiThumbs[it.file]) { done(hiThumbs[it.file]); return; }
-        if (hiPending[it.file]) { hiPending[it.file].push(done); return; }
-        hiPending[it.file] = [done];
-        var src = it.blob || bgUrl(it.file);
-        var img = new Image();
-        img.onload = function () {
-            var hi = makeThumb(img, 1280, 720, 0.85);
-            if (hi) { hiThumbs[it.file] = hi; if (!it.blob) putHi(it.file, hi); }
-            flushHi(it.file, hi || src);
-        };
-        img.onerror = function () { flushHi(it.file, src); };
-        img.src = src;
-    }
-    function flushHi(file, src) {
-        var cbs = hiPending[file] || [];
-        delete hiPending[file];
-        cbs.forEach(function (cb) { cb(src); });
+    function dataUrlToBlob(url) {
+        var parts = String(url).split(',');
+        var bin = atob(parts[1] || '');
+        var buf = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        return new Blob([buf], { type: 'image/jpeg' });
     }
 
-    /* 卡片并发上限 2：几十张 3072×1728 原图一起拉会堵住单线程的
-       python http.server，连大预览都要等好几秒。命中缓存的卡片是 data URL
-       / blob，不走网络、不占槽位。大预览的 ensureHi 是独立请求。 */
+    /* 生成 + 落盘。调用前已经把 thumbState 标成 saving，避免同一张并发写两遍。 */
+    function saveThumb(file, img) {
+        var s = stemOf(file);
+        var data = makeThumb(img, THUMB_W, THUMB_H, THUMB_Q);
+        if (!data) { thumbState[s] = 'fail'; return Promise.resolve(false); }
+        var body;
+        try { body = dataUrlToBlob(data); }
+        catch (_) { thumbState[s] = 'fail'; return Promise.resolve(false); }
+        return fetch(THUMB_PUT + '?name=' + encodeURIComponent(file), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'image/jpeg' },
+            body: body
+        }).then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            thumbAvail[s] = true;
+            thumbState[s] = 'done';
+            refreshThumbUsers(file);
+            return true;
+        }).catch(function (err) {
+            thumbState[s] = 'fail';
+            thumbServer = false;          // 写不了就整体停手，别刷 43 条同样的错误
+            thumbQueue.length = 0;
+            thumbReady = {};
+            console.warn('[Bg] 缩略图落盘失败，退回原图：', (err && err.message) || err);
+            return false;
+        });
+    }
+
+    /* 预热队列：一次一张，排在空闲时间里做，绝不和悬停抢主线程。
+       卡片已经解码过的图放在 thumbReady 里，直接拿来用，不重复下载。 */
+    function pumpThumbs() {
+        if (thumbBusy || !thumbQueue.length) return;
+        var file = thumbQueue.shift();
+        var s = stemOf(file);
+        if (thumbAvail[s] || thumbState[s] === 'saving' || thumbState[s] === 'done') {
+            return pumpThumbs();
+        }
+        if (thumbServer === false) { thumbQueue.length = 0; return; }
+        var run = function () {
+            thumbBusy = true;
+            thumbState[s] = 'saving';
+            var ready = thumbReady[file];
+            delete thumbReady[file];
+            if (ready) {
+                saveThumb(file, ready).then(function () { thumbBusy = false; pumpThumbs(); });
+                return;
+            }
+            var img = new Image();
+            img.onload = function () {
+                saveThumb(file, img).then(function () { thumbBusy = false; pumpThumbs(); });
+            };
+            img.onerror = function () {
+                thumbState[s] = 'fail';
+                thumbBusy = false;
+                pumpThumbs();
+            };
+            img.src = bgUrl(file);
+        };
+        if (window.requestIdleCallback) requestIdleCallback(run, { timeout: 1200 });
+        else setTimeout(run, 40);
+    }
+
+    /* 开面板后把还没有缩略图的图排队：把解码成本放到空闲时间，
+       免得悬停时才在主线程上临时解码 3072×1728 的原图。 */
+    function prewarmThumbs() {
+        if (thumbServer === false) return;
+        items.forEach(function (it) {
+            if (it.isManual || it.blob) return;
+            var s = stemOf(it.file);
+            if (thumbAvail[s] || thumbState[s] === 'saving' || thumbState[s] === 'done') return;
+            thumbQueue.push(it.file);
+        });
+        pumpThumbs();
+    }
+
+    /* 缩略图刚生成好：把还在用原图的卡片和大预览换成小图 */
+    function refreshThumbUsers(file) {
+        var url = thumbUrlOf(file);
+        if (!url) return;
+        Array.prototype.forEach.call(grid.querySelectorAll('.sg-bg-card'), function (c) {
+            if (c.dataset.file !== file) return;
+            var im = c.querySelector('img');
+            if (im && im.getAttribute('src') !== url) im.src = url;
+        });
+        if (previewFile === file) previewImg.src = url;
+    }
+
+    /* 卡片并发上限 2：几十张 3072×1728 原图一起拉会堵住单线程的静态服务，
+       连大预览都要等好几秒。磁盘缩略图不走网络、不占原图下载槽位。 */
     var CARD_SLOTS = 2, cardActive = 0, cardWait = [];
     function pumpCards() {
         while (cardActive < CARD_SLOTS && cardWait.length) {
@@ -1436,10 +1579,13 @@
         }
     }
 
-    /* 卡片缩略图：优先 localStorage 里的 240×135 缓存；图片载入后现场裁
-       一张小图存起来，滚动时就不必再解码大图。img 带 loading=lazy。 */
+    /* 卡片图：有磁盘缩略图就直读（~226KB，解码 2ms），没有才拉原图，
+       拉到之后顺手从**这张已解码的图**生成 720p 落盘——不再二次下载/解码。
+       原图错峰加载：同时最多 2 张。 */
     function attachThumb(img, it) {
-        var cached = thumbCache[it.file], released = false;
+        var s = stemOf(it.file);
+        var url = it.blob || thumbUrlOf(it.file);
+        var released = false;
         function release() {
             if (released) return;
             released = true;
@@ -1448,20 +1594,15 @@
         }
         img.addEventListener('load', function () {
             release();
-            if (thumbCache[it.file] || !img.naturalWidth) return;
-            var data = makeThumb(img);
-            if (!data) return;
-            thumbCache[it.file] = data;
-            saveThumbCache();
-            img.src = data;
+            if (it.blob || !img.naturalWidth) return;
+            if (thumbAvail[s] || thumbState[s] === 'saving' || thumbState[s] === 'done') return;
+            thumbReady[it.file] = img;                // 这张原图已经解码好了，排队时直接复用
+            if (thumbQueue.indexOf(it.file) < 0) thumbQueue.push(it.file);
+            pumpThumbs();
         });
         img.addEventListener('error', release);
-        // 命中缓存就是本地数据，不走网络、不占原图下载槽位；小图优先
-        var src = previewOf(it);
-        if (cached || src.indexOf('data:') === 0 || src.indexOf('blob:') === 0) {
-            released = true; img.src = cached || src; return;
-        }
-        cardWait.push(function () { img.src = previewOf(it); });
+        if (url) { released = true; img.src = url; return; }
+        cardWait.push(function () { img.src = bgUrl(it.file); });
         pumpCards();
     }
 
@@ -1501,8 +1642,8 @@
         var seq = ++scanSeq;
         var btn = document.getElementById('sg-bg-rescan');
         if (btn) { btn.classList.add('is-busy'); btn.textContent = '扫描中…'; }
-        // 目录扫描与 IndexedDB 缓存载入并行，两者都就绪再渲染，首屏不闪原图
-        return Promise.all([fetchDirectory(), loadHi()])
+        // 目录扫描与缩略图清单并行，两者都就绪再渲染，首屏直接用 720p 小图
+        return Promise.all([fetchDirectory(), loadThumbIndex()])
         .then(function (res) {
             var files = res[0];
             if (seq !== scanSeq) return;   // 丢弃过期结果，避免重复点击时乱序
@@ -1538,6 +1679,8 @@
             renderFoot();
             var imp = document.getElementById('sg-bg-import');
             if (imp) imp.style.display = directoryOk ? 'none' : '';
+            /* 首屏那几张先让卡片自己加载（顺带生成），剩下的丢给空闲预热 */
+            setTimeout(function () { if (seq === scanSeq && bgOpen) prewarmThumbs(); }, 900);
         }).then(function () {
             if (seq !== scanSeq) return;
             if (btn) { btn.classList.remove('is-busy'); btn.textContent = '↻ 重新扫描'; }
@@ -1550,8 +1693,10 @@
         var s = '共 ' + items.length + ' 张 · 悬停查看预览 · 点击即应用 · 选择自动记忆';
         if (!directoryOk) {
             s += ' ｜ 当前服务未返回目录索引，点「导入文件夹」手动选择 background/';
+        } else if (thumbServer === false) {
+            s += ' ｜ 缩略图只读 background/.thumbs/（用 run.bat 打开可自动生成）';
         } else if (newCount) {
-            s += ' ｜ ' + newCount + ' 张新图，预览由浏览器现场生成并缓存';
+            s += ' ｜ ' + newCount + ' 张新图，缩略图会自动补到 background/.thumbs/';
         } else {
             s += ' ｜ 背景图片放进 background/ 后点「↻ 重新扫描」即可';
         }
@@ -1802,7 +1947,6 @@
             currentBg = localStorage.getItem('sg-bg') || 'background.jpg';
         } catch (_) { currentBg = 'background.jpg'; }
 
-        loadThumbCache();
         buildTop();
         buildBgPanel();
         buildModelPanel();
@@ -1846,11 +1990,13 @@
         });
         window.addEventListener('focus', scheduleRescan);
 
-        // 展开控制台时先把背景面板收掉；反过来 setBgOpen() 会收起控制台
+        // 展开控制台时把右侧那几块面板一起收掉：控制台、背景、排序互斥，
+        // 同一时刻只留一块，免得互相盖住（反过来 setBgOpen / setSortOpen 也会收控制台）
         document.addEventListener('click', function (e) {
             var t = e.target;
-            if (!bgOpen || !t || !t.closest || !t.closest('#emote-dev-tab')) return;
-            setBgOpen(false);
+            if (!t || !t.closest || !t.closest('#emote-dev-tab')) return;
+            if (bgOpen) setBgOpen(false);
+            if (sortOpen) setSortOpen(false);
         }, true);
 
         // 点造型面板 / 角色 tab 以外的地方收起（两者的 click 已 stopPropagation）
@@ -1879,6 +2025,9 @@
             if (devPanelOpen()) { closeDevPanel(); return; }
             setPinned(!pinned);
         });
+
+        // 面板贴着「⇅ 排序」定位，窗口缩放后要重算，否则会错位
+        window.addEventListener('resize', function () { if (sortOpen) positionSortPanel(); });
 
         window.SGSceneUI = {
             // 兼容旧契约：models 是文件名数组；用 getter 让重扫后的内容自动可见
@@ -1915,6 +2064,12 @@
                     });
             },
             moveRole: function (name, dir) { moveRole(name, dir); return currentRoleNames(); },
+            saveOrderNow: function () { return saveOrderNow(); },
+            orderSaving: function () { return orderSaving; },
+            orderDirty: function () { return orderDirty; },
+            sortTip: function () { return sortTipMsg ? sortTipMsg.textContent : ''; },
+            orderPath: function () { return ORDER_REL; },
+            orderServer: function () { return orderServer === true; },
             resetRoleOrder: function () { resetRoleOrder(); return roleOrder.slice(); },
             openGroup: function (f) {
                 var g = findGroup(f);
@@ -1964,9 +2119,15 @@
             },
             source: 'http-directory',
             directoryOk: function () { return directoryOk; },
-            thumbCacheSize: function () { return Object.keys(thumbCache).length; },
-            hiCacheSize: function () { return Object.keys(hiThumbs).length; },
-            clearHiCache: clearHi,
+            thumbCacheSize: function () { return Object.keys(thumbAvail).length; },
+            thumbStatus: function () {
+                return { server: thumbServer, ready: Object.keys(thumbAvail).length,
+                         queued: thumbQueue.length, busy: thumbBusy,
+                         saving: Object.keys(thumbState).filter(function (k) {
+                             return thumbState[k] === 'saving';
+                         }).length };
+            },
+            prewarmThumbs: prewarmThumbs,
             homeHref: function () { return home ? home.getAttribute('href') : null; },
             modelScroll: function () {
                 if (!modelsEl) return null;

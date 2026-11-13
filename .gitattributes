@@ -1,0 +1,5 @@
+* text=auto
+
+# cmd 的 goto / 多行 if 依赖 CRLF，检出时必须还原成 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
