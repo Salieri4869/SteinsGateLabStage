@@ -1,7 +1,8 @@
 {
-  "doc": "牧瀬紅莉栖ab_白衣 的专属演出。文件名与 data/牧瀬紅莉栖/牧瀬紅莉栖ab_白衣.psb.m.pure.zip 去掉打包后缀后同名；未声明的字段继承 common.json。语音仅在此文件声明，其他模型不会串到红莉栖的台词。",
+  "doc": "牧瀬紅莉栖ab_白衣 的专属演出。文件名与 data/牧瀬紅莉栖/牧瀬紅莉栖ab_白衣.psb.m.pure.zip 去掉打包后缀后同名；未声明的字段继承 common.json。语音仅在此文件声明，其他模型不会串到红莉栖的台词。name 是该造型在模型面板里的显示名，不写则按文件名推断。",
   "extends": "common.json",
   "model": "牧瀬紅莉栖ab_白衣.psb.m.pure.zip",
+  "name": "白衣",
   "reactions": {
     "eye": {
       "pool": [

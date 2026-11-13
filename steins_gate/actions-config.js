@@ -112,8 +112,9 @@
         return sub.names.indexOf(p.stem + '.json') >= 0;
     }
 
-    // 只用于文档 / 继承定位，不进入生效配置；命名统一不带下划线。
-    var META_KEYS = { doc: 1, extends: 1, model: 1 };
+    // 只用于文档 / 继承定位 / 显示名，不进入生效配置；命名统一不带下划线。
+    // name 是造型面板的显示别名，不该被 extends 继承到别的造型。
+    var META_KEYS = { doc: 1, extends: 1, model: 1, name: 1 };
 
     /** 稀疏继承：对象递归合并，数组整体替换（pool / variables 不该拼接）。 */
     function mergeSparse(base, own) {

@@ -124,6 +124,7 @@ dist
 *.xwma
 *.png
 *.jpg
+order.json
 *.workbuddy
 emotedriver.js
 emotedriver.wasm
