@@ -42,7 +42,8 @@ Run *STEINS;GATE* character E-mote models in the browser, with arm-pose switchin
 Then serve over HTTP (`fetch` requires it; `file://` will not work):
 
 ```bash
-node main.mjs --port 8000     # on Windows, run.bat does the same
+node main.mjs --port 8000     # or ./run.sh 8000 (macOS / Linux / Git Bash)
+                              # on Windows, double-click run.bat instead
 # open http://127.0.0.1:8000/
 ```
 
@@ -56,6 +57,7 @@ Any other static server works too — those two features just degrade to read-on
 index.html                  Character archive page
 main.mjs                    Local server: static hosting + order / thumbnail writes (no deps)
 run.bat                     Windows launcher (node main.mjs --port 8000 --open)
+run.sh                      macOS / Linux launcher (./run.sh [port], default 8000)
 actions-config/             Action configs (mirrors the data/ layout)
   common.json                Shared base, used when a model has no own config
   <char>/<model>.json        Per-model performance; basename matches the model, optional

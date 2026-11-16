@@ -3,8 +3,10 @@
    用法：
      node main.mjs                     # 默认 127.0.0.1:8899
      node main.mjs --port 8000
-     node main.mjs --port 8000 --open  # 起完自动开浏览器（run.bat 走的就是这条）
+     node main.mjs --port 8000 --open  # 起完自动开浏览器（run.bat / run.sh 走的就是这条）
      node main.mjs --root .            # 换静态根目录，默认本文件所在目录
+     ./run.sh 8000                     # macOS / Linux / Git Bash 启动脚本
+     run.bat 8000                      # Windows 启动脚本
 
    在静态托管之外多三个接口，响应头都带 X-Emote-Server: node，
    前端据此判断有没有写盘能力：
@@ -388,17 +390,16 @@ function urlSearchOf(req) {
 }
 
 /* ---------- 启动 ---------- */
-/* --open：起完自动用默认浏览器打开首页（run.bat 走这条，双击就能用） */
+/* --open：起完自动开浏览器（run.bat / run.sh 走这条） */
 function openBrowser(url) {
+    const win = process.platform === 'win32';
+    const cmd = win ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+    const args = win ? ['/c', 'start', '', url] : [url];
     try {
-        if (process.platform === 'win32') {
-            spawn('cmd', ['/c', 'start', '', url], { stdio: 'ignore', detached: true, windowsHide: true }).unref();
-        } else if (process.platform === 'darwin') {
-            spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
-        } else {
-            spawn('xdg-open', [url], { stdio: 'ignore', detached: true }).unref();
-        }
-    } catch (_) { /* 开不了就算了，地址已经打印出来了 */ }
+        const child = spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true });
+        child.on('error', () => {});   // 无 xdg-open / open 时别让未捕获的 ENOENT 带崩服务
+        child.unref();
+    } catch (_) { /* 地址已经打印出来了 */ }
 }
 const server = createServer(async (req, res) => {
     const pathname = (req.url || '/').split('?')[0];

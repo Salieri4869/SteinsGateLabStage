@@ -44,7 +44,8 @@
 准备好后启动本地服务（`fetch` 加载要求 HTTP，不能直接开 `file://`）：
 
 ```bash
-node main.mjs --port 8000     # Windows 可直接双击 run.bat
+node main.mjs --port 8000     # 或 ./run.sh 8000（macOS / Linux / Git Bash）
+                              # Windows 也可直接双击 run.bat
 # 访问 http://127.0.0.1:8000/
 ```
 
@@ -58,6 +59,7 @@ node main.mjs --port 8000     # Windows 可直接双击 run.bat
 index.html                  角色档案页
 main.mjs                    本地服务：静态托管 + order / 缩略图写盘（零依赖）
 run.bat                     Windows 启动脚本（node main.mjs --port 8000 --open）
+run.sh                      macOS / Linux 启动脚本（./run.sh [port]，默认 8000）
 actions-config/             动作配置（镜像 data/ 的目录结构）
   common.json                公共 base，无专属配置时兜底
   <角色>/<模型>.json         专属演出，文件名与模型去掉打包后缀后同名，可缺省

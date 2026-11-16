@@ -3,3 +3,6 @@
 # cmd 的 goto / 多行 if 依赖 CRLF，检出时必须还原成 CRLF
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# sh 必须 LF：CRLF 会把 shebang 的解释器路径读成 sh^M
+*.sh text eol=lf
