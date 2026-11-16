@@ -80,12 +80,25 @@
         #st-live-close { background: none; border: none; color: #9fb8b4; font-size: 20px; line-height: 1; cursor: pointer; }
         #st-live .st-field { display: block; margin-bottom: 10px; font-size: 11px; color: rgba(230,241,239,.6); }
         #st-live .st-field > span { display: block; margin-bottom: 4px; }
-        #st-live select, #st-live textarea, #st-live input[type=file] {
+        #st-live select, #st-live textarea {
             width: 100%; background: rgba(0,0,0,.35); color: #dceae7;
             border: 1px solid rgba(233,185,110,.25); border-radius: 4px;
             padding: 6px 8px; font-size: 12px; font-family: inherit;
         }
         #st-live textarea { resize: vertical; line-height: 1.6; }
+        /* 原生的选择文件框与暗色主题格格不入，隐藏后用 label 触发，旁边回显文件名 */
+        #st-live-file { display: none; }
+        .st-file-row { display: flex; align-items: center; gap: 8px; }
+        .st-file-btn {
+            flex: none; padding: 6px 12px; font-size: 12px; cursor: pointer; white-space: nowrap;
+            color: #07141a; background: #e9b96e; border: 1px solid #e9b96e; border-radius: 4px;
+        }
+        .st-file-btn:hover { filter: brightness(1.08); }
+        .st-file-name {
+            flex: 1; min-width: 0; font-size: 11px; color: rgba(230,241,239,.55);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .st-file-name.has-file { color: #dceae7; }
         #st-live-src .st-live-src-title { color: #e9b96e; font-size: 11px; margin: 12px 0 6px; }
         .st-live-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
         .st-live-tabs button { flex: 1; padding: 5px 4px; font-size: 11px; cursor: pointer;
@@ -252,6 +265,10 @@
                 <button type="button" data-src="tts">文字合成</button>
             </div>
             <div data-src-pane="file">
+                <div class="st-file-row">
+                    <label class="st-file-btn" for="st-live-file">＋ 选择本地音频</label>
+                    <span id="st-live-file-name" class="st-file-name">未选择文件</span>
+                </div>
                 <input type="file" id="st-live-file" accept="audio/*">
                 <div id="st-live-import-msg" class="st-live-note">音频仅在本地播放，不会上传或保存到服务器。</div>
             </div>

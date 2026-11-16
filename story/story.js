@@ -324,7 +324,11 @@
         $('st-live-say').addEventListener('click', liveSay);
         $('st-live-stop').addEventListener('click', liveStop);
         $('st-live-file').addEventListener('change', function () {
-            liveMsg(this.files && this.files[0] ? '已选：' + this.files[0].name : '');
+            var f = this.files && this.files[0];
+            var nameEl = $('st-live-file-name');
+            nameEl.textContent = f ? f.name : '未选择文件';
+            nameEl.classList.toggle('has-file', !!f);
+            liveMsg(f ? '已选：' + f.name : '');
         });
         // 音频列表：文件夹决定文件下拉
         $('st-live-sound-folder').addEventListener('change', function () {
