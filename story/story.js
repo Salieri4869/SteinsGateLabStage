@@ -30,7 +30,8 @@
         sel: 0, typing: false, typeTimer: null, autoTimer: null,
         typeDone: null, seq: 0, lineStart: 0,
         bg: null, models: null, voices: {},
-        liveOpen: false, liveSrc: 'file', liveBusy: false, liveRole: '', voiceLib: []
+        soundFolders: [], soundFiles: {},
+        liveOpen: false, liveSrc: 'file', liveBusy: false, liveRole: '', blobUrl: ''
     };
     var audio = null;
 
@@ -94,7 +95,7 @@
     }
 
     var IMG_RE = /\.(png|jpe?g|webp|bmp|gif|avif)$/i;
-    var AUDIO_RE = /\.(opus|ogg|wav|mp3|m4a|flac)$/i;
+    var AUDIO_RE = /\.(opus|ogg|wav|mp3|m4a|flac|webm)$/i;
     var MODEL_RE = /(\.zip|\.psb|\.psb\.m)$/i;
 
     async function loadBackgrounds() {
@@ -282,8 +283,11 @@
     }
 
     /* ---------- 即时台词（独立于剧本，让当前立绘开口） ----------
-       语音走本地服务 /api/voice：POST 导入音频（octet-stream）或文字合成 TTS（json）；
-       GET?name=… 流式播放；未配 TTS 引擎时合成返回 501，前端提示降级。
+       语音来源三种：
+         ① 选择音频——本地文件在浏览器内生成临时 blob URL 直接播，不落盘、不上传；
+         ② 音频列表——列出 character/sounds/ 下的文件夹 + 文件，选中的静态路径直接播，不落盘；
+         ③ 文字合成——POST /api/voice 走服务端 TTS，未配引擎返回 501，前端提示降级。
+       三个来源都不写 story/voices/；只有文字合成的 TTS 落盘到那里。
        当前立绘由场景加载，角色下拉只决定动作宏集合——换造型仍走场景/剧本。 */
 
     function liveMsg(text, isErr) {
@@ -315,7 +319,6 @@
                 setLiveSrc(this.getAttribute('data-src'));
             });
         }
-        $('st-live-refresh').addEventListener('click', loadVoiceLib);
         $('st-live-toggle').addEventListener('click', toggleLive);
         $('st-live-close').addEventListener('click', closeLive);
         $('st-live-say').addEventListener('click', liveSay);
@@ -323,6 +326,11 @@
         $('st-live-file').addEventListener('change', function () {
             liveMsg(this.files && this.files[0] ? '已选：' + this.files[0].name : '');
         });
+        // 音频列表：文件夹决定文件下拉
+        $('st-live-sound-folder').addEventListener('change', function () {
+            loadSoundFiles(this.value);
+        });
+        loadSoundFolders();
     }
 
     function renderLiveActions() {
@@ -342,7 +350,6 @@
             panes[j].hidden = panes[j].getAttribute('data-src-pane') !== src;
         }
         liveMsg('');
-        if (src === 'lib') loadVoiceLib();
     }
 
     function toggleLive() {
@@ -367,43 +374,60 @@
         $('st-live').hidden = true;
         $('st-live-toggle').classList.remove('is-active');
         if (audio) audio.stop();
+        releaseBlobUrl();
         // 回到剧本：重渲染当前行
         if (state.mode === 'play') renderLine(state.idx);
     }
 
-    async function loadVoiceLib() {
-        try {
-            var r = await fetch('/api/voice', { cache: 'no-store' });
-            var j = await r.json();
-            state.voiceLib = j.files || [];
-            fillSelect($('st-live-lib'), state.voiceLib, $('st-live-lib').value, '（无音频，请先导入）');
-        } catch (err) {
-            liveMsg('读取音频列表失败：' + err.message, true);
+    /* 释放上一次导入的临时音频：回收 blob URL，并清掉它的解码缓冲
+       （bufferCache 以 URL 为键，blob 地址每次都不同，不清会一直累积） */
+    function releaseBlobUrl() {
+        if (state.blobUrl) {
+            URL.revokeObjectURL(state.blobUrl);
+            if (audio && audio.bufferCache) audio.bufferCache.delete(state.blobUrl);
+            state.blobUrl = '';
         }
     }
 
-    /* 把本地文件导入到服务端 voices/，返回可播放 URL */
+    /* 把本地文件变成浏览器内的临时 URL 直接播放，不落盘、不上传服务端 */
     function importSelectedVoice() {
         var f = $('st-live-file').files && $('st-live-file').files[0];
         if (!f) return Promise.reject(new Error('请先选择一个音频文件'));
-        var ext = (f.name.split('.').pop() || 'opus').toLowerCase();
-        var name = 'live-' + Date.now() + '.' + ext;
-        return fetch('/api/voice?name=' + encodeURIComponent(name), {
-            method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f
-        }).then(function (r) { return r.json().then(function (j) { return { r: r, j: j }; }); })
-          .then(function (x) {
-              if (!x.r.ok || !x.j.ok) throw new Error(x.j.error || ('导入失败 ' + x.r.status));
-              return x.j.url;
-          });
+        releaseBlobUrl();
+        state.blobUrl = URL.createObjectURL(f);
+        return Promise.resolve(state.blobUrl);
+    }
+
+    /* 音频列表：character/sounds/ 两级目录（文件夹 → 音频文件）。
+       复用已有的 listDir() 读目录索引，与背景/模型下拉同源；播放走静态路径，不落盘。 */
+    async function loadSoundFolders() {
+        var items = await listDir('../character/sounds/');
+        state.soundFolders = items.filter(function (x) { return x.isDir; })
+            .map(function (x) { return x.name; }).sort();
+        fillSelect($('st-live-sound-folder'), state.soundFolders,
+            state.soundFolders[0] || '', '（无文件夹）');
+        if (state.soundFolders.length) await loadSoundFiles(state.soundFolders[0]);
+    }
+
+    async function loadSoundFiles(folder) {
+        var sel = $('st-live-sound-file');
+        if (!folder) { fillSelect(sel, [], '', '（无音频）'); return; }
+        if (!state.soundFiles[folder]) {
+            var items = await listDir('../character/sounds/' + encodeURIComponent(folder) + '/');
+            state.soundFiles[folder] = items.filter(function (x) { return !x.isDir && AUDIO_RE.test(x.name); })
+                .map(function (x) { return x.name; }).sort();
+        }
+        var files = state.soundFiles[folder];
+        fillSelect(sel, files, files[0] || '', '（选择音频）');
     }
 
     function voiceUrlForPlay() {
         if (state.liveSrc === 'file') return importSelectedVoice();
-        if (state.liveSrc === 'lib') {
-            var name = $('st-live-lib').value;
-            return Promise.resolve(name
-                ? '/api/voice?name=' + encodeURIComponent(name)
-                : Promise.reject(new Error('请先导入并选择音频')));
+        if (state.liveSrc === 'list') {
+            var folder = $('st-live-sound-folder').value;
+            var file = $('st-live-sound-file').value;
+            if (!folder || !file) return Promise.reject(new Error('请先选择文件夹和音频'));
+            return Promise.resolve('../character/sounds/' + encodeURIComponent(folder) + '/' + encodeURIComponent(file));
         }
         // tts：POST 文字合成，拿返回的音频 URL
         var text = ($('st-live-text').value || '').trim();
@@ -725,7 +749,6 @@
         for (var i = 0; i < buttons.length; i++) {
             buttons[i].classList.toggle('is-active', buttons[i].getAttribute('data-mode') === mode);
         }
-        $('st-save').hidden = mode !== 'edit';
         if (mode === 'edit') {
             if (state.autoTimer) { clearTimeout(state.autoTimer); state.autoTimer = null; }
             skipTyping();

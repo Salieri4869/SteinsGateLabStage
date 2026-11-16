@@ -25,6 +25,12 @@
             display: flex; align-items: center; gap: 12px; padding: 0 16px;
             background: rgba(4, 12, 17, .82); border-bottom: 1px solid rgba(99, 214, 196, .22);
         }
+        .st-home {
+            color: #9fb8b4; text-decoration: none; cursor: pointer; white-space: nowrap;
+            border: 1px solid rgba(99,214,196,.25); border-radius: 4px;
+            padding: 5px 12px; font-size: 12px;
+        }
+        .st-home:hover { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
         .st-brand { font: 500 10px/1.6 ui-monospace, Consolas, monospace; letter-spacing: .28em; color: #63d6c4; }
         #st-scene {
             background: rgba(255,255,255,.06); color: #e6f1ef;
@@ -112,6 +118,7 @@
         .st-col--props { width: 348px; flex: none; }
         .st-col-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
         .st-col h2 { font-size: 13px; font-weight: 500; color: #63d6c4; }
+        .st-head-ops { display: flex; align-items: center; gap: 6px; }
 
         #st-lines {
             flex: 1; min-height: 0; overflow-y: auto; list-style: none;
@@ -207,17 +214,17 @@
     </div>
 
     <header id="st-bar">
+        <a class="st-home" href="../index.html" title="返回主页">← 主页</a>
         <span class="st-brand">STORY MODE</span>
         <select id="st-scene" aria-label="场景"></select>
         <span id="st-msg"></span>
         <span class="st-spacer"></span>
         <span id="st-progress"></span>
-        <button type="button" id="st-live-toggle" title="打开即时台词：输入文字或导入音频，让角色开口">即时台词</button>
+        <button type="button" id="st-live-toggle" title="打开即时台词：输入文字或选择音频，让角色开口">即时台词</button>
         <div class="st-modes">
             <button type="button" data-mode="play" class="is-active">播放</button>
             <button type="button" data-mode="edit">编辑</button>
         </div>
-        <button type="button" id="st-save" hidden disabled>保存</button>
     </header>
 
     <canvas id="canvas"></canvas>
@@ -240,20 +247,21 @@
         <div class="st-live-src">
             <div class="st-live-src-title">语音来源</div>
             <div class="st-live-tabs">
-                <button type="button" data-src="file" class="is-active">导入音频</button>
-                <button type="button" data-src="lib">已导入</button>
+                <button type="button" data-src="file" class="is-active">选择音频</button>
+                <button type="button" data-src="list">音频列表</button>
                 <button type="button" data-src="tts">文字合成</button>
             </div>
             <div data-src-pane="file">
                 <input type="file" id="st-live-file" accept="audio/*">
-                <div id="st-live-import-msg" class="st-live-note"></div>
+                <div id="st-live-import-msg" class="st-live-note">音频仅在本地播放，不会上传或保存到服务器。</div>
             </div>
-            <div data-src-pane="lib" hidden>
-                <select id="st-live-lib"></select>
-                <button type="button" id="st-live-refresh">刷新列表</button>
+            <div data-src-pane="list" hidden>
+                <label class="st-field"><span>文件夹（character/sounds/）</span><select id="st-live-sound-folder"></select></label>
+                <label class="st-field"><span>音频文件</span><select id="st-live-sound-file"></select></label>
+                <div class="st-live-note">播放 character/sounds/ 下已有的音频，不上传、不落盘。</div>
             </div>
             <div data-src-pane="tts" hidden>
-                <div class="st-live-note">需服务端配置 TTS 引擎（EMOTE_TTS_BIN）；未配置时会提示改用导入音频。</div>
+                <div class="st-live-note">需服务端配置 TTS 引擎（EMOTE_TTS_BIN）；未配置时会提示改用选择音频。</div>
             </div>
         </div>
         <div class="st-live-ops">
@@ -267,7 +275,10 @@
         <div class="st-col st-col--lines">
             <div class="st-col-head">
                 <h2>剧本 · <span id="st-json-name"></span></h2>
-                <button type="button" id="st-add-line">＋ 新增行</button>
+                <div class="st-head-ops">
+                    <button type="button" id="st-save" disabled>保存</button>
+                    <button type="button" id="st-add-line">＋ 新增行</button>
+                </div>
             </div>
             <ol id="st-lines"></ol>
         </div>

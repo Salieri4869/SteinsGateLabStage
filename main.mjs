@@ -581,7 +581,7 @@ async function handleApi(req, res, pathname) {
             } catch (err) {
                 if (err.code === 'NO_TTS') {
                     return sendJson(res, 501, { ok: false, code: 'NO_TTS',
-                        error: 'TTS 未配置：请用 /api/voice 导入音频，或设置 EMOTE_TTS_BIN 启用语音合成' });
+                        error: 'TTS 未配置：请在即时台词面板选择音频，或设置 EMOTE_TTS_BIN 启用语音合成' });
                 }
                 return sendJson(res, 500, { ok: false, error: err.message });
             }

@@ -26,7 +26,7 @@
 - **触摸反应**：按 `charaProfile` 部位（eye / mouth / bust / top …）划分命中区，命中后从动作池随机抽一条执行，可携带语音与变量插值。
 - **口型同步**：WebAudio 离线分析音频包络后按 rAF 查表驱动 `face_talk`；音频不可用时明确告警并跳过语音与口型，不提供第二条播放路径。
 - **场景 UI**：角色 tab 与造型面板、背景预览面板、tab 顺序调整；顺序写回 `character/actions_config/order.json`，背景与卡片统一读 `static/background/.thumbs/` 的 720p 缩略图。
-- **故事模式**：`/story` 单页双模式，可视化编辑场景（行拖拽 / ▲▼ / 增删）与打字机播放器（点击 / 自动推进 / 语音 / 动作宏）；角色绑定写在 `story/cast.json`，场景存 `story/scenes/*.json`。播放页的「即时台词」浮层可脱离剧本，直接输入文字 + 导入音频（或文字合成）让当前立绘开口说话。
+- **故事模式**：`/story` 单页双模式，可视化编辑场景（行拖拽 / ▲▼ / 增删）与打字机播放器（点击 / 自动推进 / 语音 / 动作宏）；角色绑定写在 `story/cast.json`，场景存 `story/scenes/*.json`。剧情页的「即时台词」浮层可脱离剧本，直接输入文字 + 选择音频（本地文件或 `character/sounds/` 音频列表）或文字合成，让当前立绘开口说话。
 - **开发者面板**：内置选择器 / 姿势 / 变量调试入口（`installDevPanel`）。
 
 ## 快速开始
@@ -62,12 +62,12 @@ node main.mjs --port 8000     # 或 ./run.sh 8000（macOS / Linux / Git Bash）
 | `GET/PUT /api/story` | 读写 `story/cast.json` 与 `story/scenes/*.json` |
 | `GET /api/voice` | 列出即时台词音频（`story/voices/`） |
 | `GET /api/voice?name=…` | 流式播放音频，支持 Range（可拖动进度） |
-| `POST /api/voice`（octet-stream） | 导入音频，上限 12MB |
+| `POST /api/voice`（octet-stream） | 外部导入音频落盘，上限 12MB（页面「选择音频」「音频列表」都不走这里，不写盘） |
 | `POST /api/voice`（json） | 文字 → 语音合成（TTS 预留，`{"text":"…"}`） |
 
-**即时台词的语音来源**：默认走「导入音频」——在面板里选本地音频上传即可，无需额外依赖。「文字合成」是 TTS 预留接口：设置环境变量 `EMOTE_TTS_BIN`（如 `edge-tts`）和可选的 `EMOTE_TTS_VOICE`（默认 `zh-CN-XiaoxiaoNeural`）后启用，未配置时接口返回 501、前端提示改用导入音频。外部命令需支持 `--voice <名> --text <文字> --write-media <文件>` 参数。
+**即时台词的语音来源**：三个 tab。「选择音频」——在面板里选本地音频，浏览器内用临时 blob URL 直接播放，不上传、不写盘；「音频列表」——列出 `character/sounds/` 下的文件夹与音频文件，选一个走静态路径直接播放，同样不写盘；「文字合成」是 TTS 预留接口：设置环境变量 `EMOTE_TTS_BIN`（如 `edge-tts`）和可选的 `EMOTE_TTS_VOICE`（默认 `zh-CN-XiaoxiaoNeural`）后启用，未配置时接口返回 501、前端提示改用「选择音频」；只有合成的音频会落盘到 `story/voices/`。外部命令需支持 `--voice <名> --text <文字> --write-media <文件>` 参数。
 
-换成其他静态服务器也能跑，只是写盘能力退化为只读——排序只在本次会话有效，缩略图只用已有文件，剧本无法保存，即时台词无法导入音频。
+换成其他静态服务器也能跑，只是写盘能力退化为只读——排序只在本次会话有效，缩略图只用已有文件，剧本无法保存，文字合成（TTS）不可用；「选择音频」「音频列表」不依赖服务端写盘，照常可用。
 
 ## 目录结构
 
@@ -104,7 +104,7 @@ story/                      剧情模式：可视化编辑 + 播放
   story.js                  场景读写、打字机播放器、行编辑器
   cast.json                 角色 → 模型 / 语音目录 / 动作宏
   scenes/                   场景 JSON
-  voices/                   即时台词导入的音频（页面生成，可入库）
+  voices/                   TTS 合成的音频（「选择音频」「音频列表」不落盘，只有文字合成才写这里）
 driver/                     E-mote 运行时（不入库）
 libs/fflate.js              zip 解压（第三方）
 docs/                       技术文档

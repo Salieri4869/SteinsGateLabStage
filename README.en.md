@@ -26,7 +26,7 @@ The homepage `index.html` has three in-page tabs ("Works / Characters / Tech") p
 - **Touch reactions** — hit areas derived from `charaProfile` labels (eye / mouth / bust / top …), each resolving to a random action from a pool, optionally with audio and variable interpolation.
 - **Lip sync** — offline WebAudio envelope analysis driving `face_talk` via rAF lookup. No fallback playback path; audio failures are reported and skipped.
 - **Scene UI** — character tabs with a model panel, a background preview panel, and tab reordering. Order is written back to `character/actions_config/order.json`; backgrounds and cards read the 720p thumbnails in `static/background/.thumbs/`.
-- **Story Mode** — `/story` is a single page with two modes: a visual scene editor (drag / ▲▼ / add-remove lines) and a typewriter player (click / auto advance / voice / action macros). Character bindings live in `story/cast.json`, scenes in `story/scenes/*.json`. The player's "Live line" panel lets you type text + import audio (or synthesize it) and make the current model speak, without a script.
+- **Story Mode** — `/story` is a single page with two modes: a visual scene editor (drag / ▲▼ / add-remove lines) and a typewriter player (click / auto advance / voice / action macros). Character bindings live in `story/cast.json`, scenes in `story/scenes/*.json`. The player's "Live line" panel lets you type text + pick audio (a local file or one from the `character/sounds/` audio list) or synthesize it, and make the current model speak without a script.
 - **Dev panel** — built-in inspector for selectors, poses and variables (`installDevPanel`).
 
 ## Quick start
@@ -62,12 +62,12 @@ Once running, the homepage offers three in-page anchors (Works / Characters / Te
 | `GET/PUT /api/story` | Read/write `story/cast.json` and `story/scenes/*.json` |
 | `GET /api/voice` | List live-line audio (`story/voices/`) |
 | `GET /api/voice?name=…` | Stream audio with Range support (seekable) |
-| `POST /api/voice` (octet-stream) | Import audio, 12MB max |
+| `POST /api/voice` (octet-stream) | Import audio to disk, 12MB max (the page's "Pick audio" / "Audio list" never use this — no disk writes) |
 | `POST /api/voice` (json) | Text → speech synthesis (TTS hook, `{"text":"…"}`) |
 
-**Live-line audio source**: the default is "import audio" — pick a local file in the panel, no extra dependencies. "Text synthesis" is a TTS hook: set env vars `EMOTE_TTS_BIN` (e.g. `edge-tts`) and optionally `EMOTE_TTS_VOICE` (default `zh-CN-XiaoxiaoNeural`) to enable it; without config the endpoint returns 501 and the UI tells you to import audio instead. The external command must accept `--voice <name> --text <text> --write-media <file>`.
+**Live-line audio source**: three tabs. "Pick audio" plays a local file in-browser via a temporary blob URL — never uploaded or written to disk. "Audio list" lists folders and audio files under `character/sounds/` and plays the chosen one from a static path — also never written to disk. "Text synthesis" is a TTS hook: set env vars `EMOTE_TTS_BIN` (e.g. `edge-tts`) and optionally `EMOTE_TTS_VOICE` (default `zh-CN-XiaoxiaoNeural`) to enable it; without config the endpoint returns 501 and the UI tells you to pick audio instead. Only synthesized audio is saved to `story/voices/`. The external command must accept `--voice <name> --text <text> --write-media <file>`.
 
-Any other static server works too — write capabilities just degrade to read-only: ordering lasts for the session, thumbnails are only read from disk, scenes cannot be saved, and live audio cannot be imported.
+Any other static server works too — write capabilities just degrade to read-only: ordering lasts for the session, thumbnails are only read from disk, scenes cannot be saved, and text synthesis (TTS) is unavailable; "Pick audio" and "Audio list" need no server-side writes and still work.
 
 ## Layout
 
@@ -104,7 +104,7 @@ story/                      Story mode: visual editor + player
   story.js                  Scene I/O, typewriter player, line editor
   cast.json                 Character -> model / voice dir / action macros
   scenes/                   Scene JSON files
-  voices/                   Live-line audio imported by the page (generated, may be committed)
+  voices/                   TTS-synthesized audio ("pick audio" / "audio list" never write here; only text synthesis does)
 driver/                     E-mote runtime (not in repo)
 libs/fflate.js              zip inflate (third-party)
 docs/                       Technical write-ups
