@@ -1,0 +1,11 @@
+{
+  "doc": "示例剧本。background 为 steins_gate/background/ 下的文件名；role 与 action 引用 cast.json；voice 为 voiceDir 下的文件名，留空或省略则不播语音。auto=true 时按 wait 毫秒自动推进，否则点击推进；不写的字段一律取默认值。",
+  "title": "未来道具研究所 · 夜",
+  "background": "ev_f001a.png",
+  "lines": [
+    { "role": "红莉栖", "text": "……比预计早了三分钟。", "action": "平常", "voice": "" },
+    { "role": "红莉栖", "text": "Lab 的门锁换过了，你应该没发现吧。", "action": "微笑", "voice": "resg00_01_krs0005.xwma.opus" },
+    { "role": "红莉栖", "text": "别站在门口，进来。", "action": "困扰", "voice": "resg00_01_krs0007.xwma.opus" },
+    { "role": "红莉栖", "text": "……", "action": "惊讶", "voice": "", "auto": true, "wait": 1200 }
+  ]
+}

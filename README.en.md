@@ -11,10 +11,13 @@ Run *STEINS;GATE* character E-mote models in the browser, with arm-pose switchin
 
 ## Contents
 
+The homepage `index.html` has three in-page tabs ("Works / Characters / Tech") plus two mode entries in the top nav: Story Mode and LAB:
+
 | Entry | Description |
 |---|---|
 | `index.html` | Character archive page (world intro + Labmem roster), pure static |
-| `steins_gate/index.html` | E-mote player (**main feature**) — requires the prerequisites below |
+| `story/index.html` | **Story Mode**: visually edit lines and play them back — typewriter with click / auto advance |
+| `steins_gate/index.html` | **LAB player**: interactive E-mote models (touch reactions, arm poses, lip sync). Both modes need the files under "Quick start" below |
 
 ## Features
 
@@ -22,10 +25,11 @@ Run *STEINS;GATE* character E-mote models in the browser, with arm-pose switchin
 - **Arm-pose switching** — handles PSB 4.0 mutually exclusive append-parts (`insert` / `delete`) by patching the GPU texture upload, erasing the unused arm set. Works with an SDK runtime that only supports 3.9.8.
 - **Touch reactions** — hit areas derived from `charaProfile` labels (eye / mouth / bust / top …), each resolving to a random action from a pool, optionally with audio and variable interpolation.
 - **Lip sync** — offline WebAudio envelope analysis driving `face_talk` via rAF lookup. No fallback playback path; audio failures are reported and skipped.
-- **Scene UI** — character tabs with a model panel, a background preview panel, and tab reordering. Order is written back to `actions-config/order.json`; backgrounds and cards read the 720p thumbnails in `background/.thumbs/`.
+- **Scene UI** — character tabs with a model panel, a background preview panel, and tab reordering. Order is written back to `actions_config/order.json`; backgrounds and cards read the 720p thumbnails in `background/.thumbs/`.
+- **Story Mode** — `/story` is a single page with two modes: a visual scene editor (drag / ▲▼ / add-remove lines) and a typewriter player (click / auto advance / voice / action macros). Character bindings live in `story/cast.json`, scenes in `story/scenes/*.json`.
 - **Dev panel** — built-in inspector for selectors, poses and variables (`installDevPanel`).
 
-## Prerequisites
+## Quick start
 
 **This repository does not run out of the box.** Two categories of files are required and both are excluded by `.gitignore`:
 
@@ -47,33 +51,42 @@ node main.mjs --port 8000     # or ./run.sh 8000 (macOS / Linux / Git Bash)
 # open http://127.0.0.1:8000/
 ```
 
-`main.mjs` is a dependency-free static server (Node 18+). Beyond `python -m http.server` it adds two write endpoints:
-reordering character tabs is written back to `actions-config/order.json`, and background thumbnails land in `background/.thumbs/`.
-Any other static server works too — those two features just degrade to read-only: ordering lasts for the session, thumbnails are only read from disk.
+Once running, the homepage offers three in-page anchors (Works / Characters / Tech) and two mode entries: the LAB interactive player and Story Mode. For story voice, drop audio into `sounds/` (missing files are silently skipped).
+
+`main.mjs` is a dependency-free static server (Node 18+, default port 8899; `run.bat` / `run.sh` default to 8000). Beyond `python -m http.server` it adds three write endpoints:
+tab order is written back to `actions_config/order.json`, background thumbnails land in `background/.thumbs/`, and Story Mode reads/writes `story/cast.json` and `story/scenes/*.json`.
+Any other static server works too — those three features just degrade to read-only: ordering lasts for the session, thumbnails are only read from disk, and scenes cannot be saved.
 
 ## Layout
 
 ```
 index.html                  Character archive page
-main.mjs                    Local server: static hosting + order / thumbnail writes (no deps)
+main.mjs                    Local server: static hosting + order / thumbnail / scene writes (no deps)
 run.bat                     Windows launcher (node main.mjs --port 8000 --open)
 run.sh                      macOS / Linux launcher (./run.sh [port], default 8000)
-actions-config/             Action configs (mirrors the data/ layout)
+actions_config/             Action configs (mirrors the data/ layout)
   common.json                Shared base, used when a model has no own config
   <char>/<model>.json        Per-model performance; basename matches the model, optional
   order.json                 Character tab order, rewritten on reorder
+common/                     Runtime shared by the player and story pages
+  emote_core.js             Core: SDK bootstrap, animation loop, responsive layout (createLayout)
+  action_config.js          Loads config by model name, sparse extends, inventory reconcile
+  model_loader.js           PSB v4 parser + exclusive-parts config + loader
+  gl_arm_pose.js            Texture-level arm erase (hooks texImage2D / texSubImage2D)
+  lipsync.js                Lip sync (offline WebAudio analysis, rAF lookup)
+  emote_config.js           Base model / action config
+  config_validator.js       Config shape validation (with CLI self-test)
 steins_gate/
   index.html                Player entry
-  main.js                   Bootstrap, canvas layout, arm switcher, dev panel
-  model-loader.js           PSB v4 parser + exclusive-parts config + loader
-  gl-arm-pose.js            Texture-level arm erase (hooks texImage2D / texSubImage2D)
-  lipsync.js                Lip sync (offline WebAudio analysis, rAF lookup)
-  scene-ui.js               Control bar, model / sort / background panels
-  actions-config-loader.js  Loads config by model name, sparse extends, inventory reconcile
-  emote-config.js           Base model / action config
-  config-validator.js       Config shape validation (with CLI self-test)
+  main.js                   Bootstrap, interaction, arm switcher, dev panel
+  scene_ui.js               Control bar, model / sort / background panels
   background/               Background images (not in repo)
     .thumbs/                720p thumbnails, generated by the page
+story/                      Story mode: visual editor + player
+  index.html                Story entry (single page, two modes)
+  story.js                  Scene I/O, typewriter player, line editor
+  cast.json                 Character -> model / voice dir / action macros
+  scenes/                   Scene JSON files
 driver/                     E-mote runtime (not in repo)
 libs/fflate.js              zip inflate (third-party)
 data/                       Models (not in repo)

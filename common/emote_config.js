@@ -1,5 +1,5 @@
 // ============================================================
-//  emote-config.js —— E-mote 全局配置（须最先加载）
+//  emote_config.js —— E-mote 全局配置（须最先加载）
 //
 //  1) 必须在 emotedriver.js 之前执行（TOTAL_MEMORY 是实例化期参数）
 //  2) wasm 版读 window.EmoteModule，asm.js 版读 window.Module

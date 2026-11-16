@@ -4,7 +4,7 @@
 //  架构：
 //    ModelLoader            模型下载 / 解压 / 初始化
 //    LipSyncPlayer          音频播放 + 口型同步
-//    ResponsiveLayout       显示/缓冲尺寸解耦 + resize 自适应
+//    SGEmoteCore.createLayout 显示/缓冲尺寸解耦 + resize 自适应（common/emote_core.js）
 //    TransformController    滚轮缩放 + 拖动
 //    InteractionManager     命中判定 → 触发动作 → 恢复
 //    start()                组装配置、加载模型、串联各层
@@ -19,12 +19,11 @@
 
 const DEFAULT_FADE_TIME = 300;
 const DEFAULT_HOLD_MS = 1000;
-const MAX_TEXTURE_SIZE = 8192;
 
 // SDK 3.9.8 不支持 4.0 的 customPartsList / emote.extension.command.insert，
 // 会把两套互斥手臂同时画出来（4 个袖子）。
-// 修复在 GPU 纹理层：gl-arm-pose.js 在 atlas 经 texImage2D 上传时，
-// 按互斥组矩形把其中一套写 0 / 另一套还原。配置由 model-loader.js
+// 修复在 GPU 纹理层：gl_arm_pose.js 在 atlas 经 texImage2D 上传时，
+// 按互斥组矩形把其中一套写 0 / 另一套还原。配置由 model_loader.js
 // 直接从模型 zip 的 PSB 字节里算出，换模型只要换 zip；模型本来只有
 // 一套手臂时自动跳过补丁、正常显示。setArmPose() 只改纹理，不重建
 // 模型实例，动画与物理连续，单次约 0.1s。
@@ -41,7 +40,7 @@ function readModelIndex() {
         return (idx && typeof idx === 'object' && !Array.isArray(idx)) ? idx : null;
     } catch (_) { return null; }
 }
-/* 纯文件名 → 「角色/文件名」。索引由 scene-ui.js 每次扫描后写入，
+/* 纯文件名 → 「角色/文件名」。索引由 scene_ui.js 每次扫描后写入，
    新加角色文件夹无需改这里。 */
 function resolveModelPath(file) {
     var idx = readModelIndex();
@@ -113,107 +112,12 @@ async function resolveModelUrl() {
 }
 const DEFAULT_ARM_POSE = 'crossed';   // 兼容旧 API 的别名；实际姿势名与按钮标签一律取模型自身的选项名
 
-// ============================================================
-//  动画主循环（官方 demo 写法）
-// ============================================================
-class EmoteAnimationController {
-    constructor() { this.device = null; this.requestId = null; }
-    onStartEmoteAnimation(device) {
-        this.device = device;
-        this.requestId = requestAnimationFrame(this.drawAnimation.bind(this));
-    }
-    onStopEmoteAnimation() {
-        if (this.requestId !== null) { cancelAnimationFrame(this.requestId); this.requestId = null; }
-    }
-    drawAnimation(timeStamp) {
-        if (!this.device) return;
-        this.device.drawAnimation(timeStamp);
-        this.requestId = requestAnimationFrame(this.drawAnimation.bind(this));
-    }
-}
-window.emoteAnimationController = new EmoteAnimationController();
+// 动画主循环由 common/emote_core.js 提供（window.emoteAnimationController），
+// 播放页与剧情页共用同一份实现。
 
-// ============================================================
-//  ResponsiveLayout —— 响应式布局
-// ============================================================
-class ResponsiveLayout {
-    constructor(player, canvas, config) {
-        this.player = player;
-        this.canvas = canvas;
-        this.config = config;
-        this.baseCoord = [player.coord[0], player.coord[1]];
-        this._resizeFrame = null;
-        this._onResize = this._onResize.bind(this);
-        window.addEventListener('resize', this._onResize);
-        this.apply();
-    }
-
-    /** 视口高度 → 模型缩放比例（线性插值，下限 0.05） */
-    static getHeightRatio(height) {
-        const h1 = 600, r1 = 0.3, h2 = 1600, r2 = 0.9;
-        const m = (r2 - r1) / (h2 - h1);
-        return Math.max(0.05, m * height + r1 - m * h1);
-    }
-
-    _displaySize() {
-        const w = window.innerWidth || document.body.clientWidth || 1;
-        const h = window.innerHeight || document.body.clientHeight || 1;
-        return { width: w, height: h };
-    }
-
-    /** 缓冲尺寸 = 显示 × DPR，受 8192 约束 */
-    _bufferSize(display) {
-        const dpr = window.devicePixelRatio || 1;
-        let w = Math.round(display.width * dpr);
-        let h = Math.round(display.height * dpr);
-        if (w > MAX_TEXTURE_SIZE || h > MAX_TEXTURE_SIZE) {
-            const k = Math.min(MAX_TEXTURE_SIZE / w, MAX_TEXTURE_SIZE / h);
-            w = Math.round(w * k); h = Math.round(h * k);
-        }
-        return { width: w, height: h };
-    }
-
-    apply() {
-        const canvas = this.canvas;
-        const display = this._displaySize();
-        const buf = this._bufferSize(display);
-
-        Object.assign(canvas.style, {
-            position: 'fixed', top: '0', left: '0',
-            width: `${display.width}px`, height: `${display.height}px`,
-            objectFit: 'contain', display: 'block', touchAction: 'none',
-            background: 'transparent', zIndex: '1', pointerEvents: 'auto',
-        });
-
-        // 缓冲层仅首次初始化，此后绝不改 canvas.width/height（避免黑屏）
-        if (!this._bufferInitialized) {
-            canvas.width = buf.width;
-            canvas.height = buf.height;
-            this._bufferInitialized = true;
-            this._log(`🖼 缓冲层: ${buf.width}×${buf.height}（此后不变）`);
-        }
-
-        // 模型缩放（逻辑缩放，不乘 DPR）
-        this.player.scale = ResponsiveLayout.getHeightRatio(display.height);
-
-        // 垂直居中
-        const offsetRatio = this.config.transform?.verticalOffsetRatio ?? 0.5;
-        const c = this.player.coord;
-        c[0] = this.baseCoord[0];
-        c[1] = this.baseCoord[1] - (0.5 - offsetRatio) * buf.height;
-        this.player.coord = c;
-
-        if (EmotePlayer.device) EmotePlayer.device.invalidateAnimation();
-        this._log(`📐 display=${display.width}×${display.height} buf=${buf.width}×${buf.height} scale=${this.player.scale.toFixed(3)}`);
-    }
-
-    _onResize() {
-        if (this._resizeFrame !== null) cancelAnimationFrame(this._resizeFrame);
-        this._resizeFrame = requestAnimationFrame(() => { this._resizeFrame = null; this.apply(); });
-    }
-
-    _log(...args) { if (this.config.debug) console.log(...args); }
-}
+/* 显示/缓冲尺寸解耦 + resize 自适应统一走 common/emote_core.js 的
+   SGEmoteCore.createLayout（播放页与剧情页共用同一份实现）。
+   本页的 canvas 全屏定位样式写在 steins_gate/index.html 的 #canvas 里。 */
 
 // ============================================================
 //  TransformController —— 滚轮缩放 + 拖动
@@ -325,7 +229,7 @@ function rectOf(prof, key) {
     return { ax: Math.min(...xs), ay: Math.min(...ys), bx: Math.max(...xs), by: Math.max(...ys) };
 }
 
-/** 该部位能不能定位（供 actions-config-loader 的库存对齐判断是否保留；与 _regionOf 的分层一一对应） */
+/** 该部位能不能定位（供 actions_config 的库存对齐判断是否保留；与 _regionOf 的分层一一对应） */
 function canPlacePart(player, key) {
     const prof = (player && player.charaProfile) || {};
     const hasRect = !!rectOf(prof, key);
@@ -898,7 +802,7 @@ function installDevPanel(player, config) {
         const st = document.createElement('style');
         st.id = 'emote-dev-style';
         st.textContent = `
-/* 顶部 56px 留给 scene-ui.js 的控制条（主页槽位、角色 tab、右侧工具按钮），
+/* 顶部 56px 留给 scene_ui.js 的控制条（主页槽位、角色 tab、右侧工具按钮），
    否则展开控制台时标题栏与「收起 ›」会被控制条完全盖住、点不到。 */
 #emote-dev-panel{position:fixed;top:56px;right:0;height:calc(100vh - 56px);width:340px;max-width:92vw;
  z-index:60;display:flex;flex-direction:column;color:#eceff4;
@@ -1242,7 +1146,7 @@ async function start() {
         return;
     }
 
-    // 动作配置按 data/<角色>/<模型> 镜像推导 actions-config/<角色>/<模型>.json，
+    // 动作配置按 data/<角色>/<模型> 镜像推导 actions_config/<角色>/<模型>.json，
     // 与模型并行取；缺专属文件回退 common.json，两者都取不到就明确报错，不再静默无动作。
     let loaded;
     try {
@@ -1250,14 +1154,14 @@ async function start() {
     } catch (err) {
         console.error('[ActionsConfig] 配置目录加载异常', err);
         hideLoading();
-        alert('动作配置加载失败，请检查 actions-config/ 目录');
+        alert('动作配置加载失败，请检查 actions_config/ 目录');
         return;
     }
     const actionsConfig = loaded.config;
     if (!actionsConfig) {
         hideLoading();
-        console.error('❌ 未找到动作配置：actions-config/common.json');
-        alert('动作配置缺失，请检查 actions-config/common.json');
+        console.error('❌ 未找到动作配置：actions_config/common.json');
+        alert('动作配置缺失，请检查 actions_config/common.json');
         return;
     }
     if (!validateActionsConfigSafe(actionsConfig)) { hideLoading(); return; }
@@ -1267,89 +1171,61 @@ async function start() {
     const canvas = document.getElementById('canvas');
     if (!canvas) { console.error('Canvas 不存在'); hideLoading(); return; }
 
-    // ① createRenderCanvas（固定缓冲尺寸，DPR 缩放受 8192 约束）
-    const dpr = window.devicePixelRatio || 1;
-    const BUF_W = Math.min(Math.round(window.innerWidth * dpr), MAX_TEXTURE_SIZE);
-    const BUF_H = Math.min(Math.round(window.innerHeight * dpr), MAX_TEXTURE_SIZE);
-    EmotePlayer.createRenderCanvas(BUF_W, BUF_H);
-
-    // ② new EmotePlayer
-    const player = new EmotePlayer(canvas);
-    player.scale = config.model.scale != null ? config.model.scale : 0.8;
-    player.convolveCanvasMovementToPhysics = true;
-
-    // 切换模型走整页重载，浏览器会销毁整个文档；这里再显式走一遍 SDK 释放链
-    // （EmotePlayer_Finish → EmoteDevice_Finish → GL.deleteContext），
-    // 让 wasm 模型数据与 WebGL 纹理在导航前就归还，避免新旧页面短暂共存时的峰值。
-    // persisted=true 表示页面进入 bfcache（按后退还能恢复），此时绝不能销毁。
-    window.addEventListener('pagehide', function (evt) {
-        if (evt.persisted) return;
-        try { player.destroy(); } catch (_) { /* 卸载阶段 wasm 可能已拆除 */ }
-    }, { once: true });
-
-    // ③ loadData（原始模型）+ GPU 纹理层手臂补丁
-    ModelLoader.attach(player, config.model.url, config.armPose)
-        .then((pose) => {
-            // 3.9.8 无法真正插入/删除部件，追加部件的显隐由纹理补丁接管。
-            // 差分时间线若写的是 GPU 接管的选择器索引变量（arm_type / yubi_type），
-            // SelectorAPI 的时间线桥会逐帧把值同步到 GPU 状态，可以正常播放。
-            player.diffTimelineSlot3 = '';
-            player.diffTimelineSlot4 = '';
-
-            // 库存对齐：attach 之后才有 player 的真实清单，把配置里写死的名字
-            // 求解成当前模型存在的名字、剔除无效引用，再交给 InteractionManager。
-            if (window.SGActionsConfig) {
-                try {
-                    // 第四个参数告诉库存对齐「哪些部位能被定位」：锚点缺失但能用
-                    // 上下界/矩形推出的部位要保留，而不是按 marker 名一删了之
-                    window.SGActionsConfig.reconcile(config, player, configSource,
-                        (key) => canPlacePart(player, key));
-                } catch (err) {
-                    console.warn('[ActionsConfig] 库存对齐失败，配置按原样使用', err);
-                }
-            }
-
-            if (config.debug) window.player = player;
-            console.log('armPose:', pose, '| armGL:', window.ArmPoseGL && window.ArmPoseGL.info());
-            console.log('charaBounds:', player.charaBounds);
-            console.log('charaHeight:', player.charaHeight);
-
-            new ResponsiveLayout(player, canvas, config);
-            new InteractionManager(player, canvas, config);
-            new TransformController(player, canvas, config);
-            // 侧边控制台默认收起；互斥部件按钮直接挂进面板，不再单独放右下角
-            const dev = installDevPanel(player, config);
-            installArmPoseSwitcher(player, config, dev.gpuHost);
-
-            if (config.debug) {
-                console.log('✅ 启动完成');
-                console.log('💡 可点击部位：' + Object.keys(config.reactions).join('、'));
-                if (ModelLoader.getArmPose()) {
-                    const sels = ModelLoader.getSelectorInfo();
-                    const desc = sels.map((s) => s.label + ': '
-                        + (s.options || []).map((o) => JSON.stringify(o)).join(' / ')).join(' | ');
-                    console.log('💡 互斥选项：' + desc
-                        + '；可用 await setOption(选择器, 选项)，或展开右侧「控制台」面板');
-                    console.log('💡 自动识别到的互斥选择器：', sels);
-                }
-            }
-
-            // 模型与交互全部就位后淡出中央 loading：前台等两帧首帧；
-            // 后台标签页 rAF 会被节流甚至暂停，故加一条定时兜底保证一定能收起
-            let loadingDone = false;
-            const finishLoading = () => {
-                if (loadingDone) return;
-                loadingDone = true;
-                hideLoading();
-            };
-            requestAnimationFrame(function () { requestAnimationFrame(finishLoading); });
-            setTimeout(finishLoading, 320);
-        })
-        .catch((err) => {
-            hideLoading();
-            console.error('❌ 模型加载失败:', err);
-            alert('模型加载失败，请检查路径、fflate.js 与模型文件');
+    // SDK 启动交给公共内核；本页只装配自己的布局、交互与面板
+    let ctx;
+    try {
+        ctx = await window.SGEmoteCore.create({
+            canvas: canvas,
+            modelUrl: modelUrl,
+            config: config,
+            configSource: configSource,
+            canPlacePart: canPlacePart
         });
+    } catch (err) {
+        hideLoading();
+        console.error('❌ 模型加载失败:', err);
+        alert('模型加载失败，请检查路径、fflate.js 与模型文件');
+        return;
+    }
+    const player = ctx.player;
+
+    console.log('armPose:', ctx.armPose, '| armGL:', window.ArmPoseGL && window.ArmPoseGL.info());
+    console.log('charaBounds:', player.charaBounds);
+    console.log('charaHeight:', player.charaHeight);
+
+    window.SGEmoteCore.createLayout(player, canvas, {
+        verticalOffsetRatio: config.transform?.verticalOffsetRatio ?? 0.5,
+        debug: config.debug
+    });
+    new InteractionManager(player, canvas, config);
+    new TransformController(player, canvas, config);
+    // 侧边控制台默认收起；互斥部件按钮直接挂进面板，不再单独放右下角
+    const dev = installDevPanel(player, config);
+    installArmPoseSwitcher(player, config, dev.gpuHost);
+
+    if (config.debug) {
+        console.log('✅ 启动完成');
+        console.log('💡 可点击部位：' + Object.keys(config.reactions).join('、'));
+        if (ModelLoader.getArmPose()) {
+            const sels = ModelLoader.getSelectorInfo();
+            const desc = sels.map((s) => s.label + ': '
+                + (s.options || []).map((o) => JSON.stringify(o)).join(' / ')).join(' | ');
+            console.log('💡 互斥选项：' + desc
+                + '；可用 await setOption(选择器, 选项)，或展开右侧「控制台」面板');
+            console.log('💡 自动识别到的互斥选择器：', sels);
+        }
+    }
+
+    // 模型与交互全部就位后淡出中央 loading：前台等两帧首帧；
+    // 后台标签页 rAF 会被节流甚至暂停，故加一条定时兜底保证一定能收起
+    let loadingDone = false;
+    const finishLoading = () => {
+        if (loadingDone) return;
+        loadingDone = true;
+        hideLoading();
+    };
+    requestAnimationFrame(function () { requestAnimationFrame(finishLoading); });
+    setTimeout(finishLoading, 320);
 }
 
 /** 安全校验（失败弹窗，不抛崩） */

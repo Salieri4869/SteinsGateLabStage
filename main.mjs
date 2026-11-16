@@ -8,12 +8,14 @@
      ./run.sh 8000                     # macOS / Linux / Git Bash 启动脚本
      run.bat 8000                      # Windows 启动脚本
 
-   在静态托管之外多三个接口，响应头都带 X-Emote-Server: node，
+   在静态托管之外多四个接口，响应头都带 X-Emote-Server: node，
    前端据此判断有没有写盘能力：
-     GET  /api/order              读 actions-config/order.json
+     GET  /api/order              读 actions_config/order.json
      PUT  /api/order              写回角色顺序 {"roles": [...]}
      GET  /api/thumbs             background/.thumbs/ 里已有的缩略图
      PUT  /api/thumb?name=原图名  收 1280×720 JPEG，落成 .thumbs/<原名>.jpg
+     GET  /api/story              story/scenes/ 下的场景清单
+     GET/PUT /api/story?name=…     读/写剧本与 cast.json（点保存时调用）
    探测不到（python / file:// / 别人的机器）时前端只改内存、只读已有缩略图，
    提示会直说没连上服务，不假装保存成功。
 
@@ -41,8 +43,8 @@ function argOf(name, dflt) {
 const PORT = Number(argOf('--port', process.env.PORT || 8899));
 const HOST = argOf('--host', '127.0.0.1');
 const ROOT = resolve(argOf('--root', HERE));
-const ORDER_FILE = join(ROOT, 'actions-config', 'order.json');
-const ORDER_REL = 'actions-config/order.json';
+const ORDER_FILE = join(ROOT, 'actions_config', 'order.json');
+const ORDER_REL = 'actions_config/order.json';
 const MAX_BODY = 256 * 1024;         // 200 个角色名远用不到这么多，超了按异常请求处理
 
 /* 背景缩略图落盘目录：background/.thumbs/<原名去扩展名>.jpg（1280×720）
@@ -52,6 +54,12 @@ const THUMB_DIR = join(BG_DIR, '.thumbs');
 const THUMB_REL = 'steins_gate/background/.thumbs';
 const THUMB_MAX = 2 * 1024 * 1024;   // 实测 720p JPEG 约 120~220KB，2MB 兜底
 const IMG_EXT = /\.(jpe?g|png|webp|bmp|gif|avif)$/i;
+
+/* 剧情数据：只写 story/cast.json 与 story/scenes/<slug>.json，文件名一律 ASCII slug */
+const STORY_DIR = join(ROOT, 'story');
+const SCENE_DIR = join(STORY_DIR, 'scenes');
+const CAST_FILE = join(STORY_DIR, 'cast.json');
+const SCENE_NAME = /^[a-z0-9][a-z0-9-]*\.json$/;
 
 /* ---------- MIME ---------- */
 const MIME = {
@@ -260,6 +268,82 @@ async function writeThumb(name, buf) {
     return { file: base, thumb: stem + '.jpg', bytes: buf.length };
 }
 
+/* ---------- 剧情剧本 ---------- */
+function storyTarget(name) {
+    if (!name) throw new Error('缺少 name');
+    if (name.length > 64 || BAD_CHARS.test(name) || name.includes('..') || name.startsWith('.')) {
+        throw new Error('非法文件名');
+    }
+    if (name === 'cast.json') return { abs: CAST_FILE, rel: 'story/cast.json', kind: 'cast' };
+    if (!SCENE_NAME.test(name)) throw new Error('场景名须为小写字母/数字/连字符 + .json');
+    return { abs: join(SCENE_DIR, name), rel: 'story/scenes/' + name, kind: 'scene' };
+}
+
+function validateStory(kind, data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('必须是 JSON 对象');
+    if (kind === 'cast') {
+        for (const [role, entry] of Object.entries(data)) {
+            if (role === 'doc') continue;
+            if (!entry || typeof entry !== 'object' || typeof entry.model !== 'string' || !entry.model) {
+                throw new Error('角色「' + role + '」缺少 model');
+            }
+        }
+        return;
+    }
+    if (typeof data.title !== 'string') throw new Error('场景缺少 title');
+    if (data.background !== undefined && typeof data.background !== 'string') throw new Error('background 须为字符串');
+    if (!Array.isArray(data.lines)) throw new Error('lines 必须是数组');
+    if (data.lines.length > 2000) throw new Error('行数过多');
+    data.lines.forEach((line, i) => {
+        const at = '第 ' + (i + 1) + ' 行';
+        if (!line || typeof line !== 'object' || Array.isArray(line)) throw new Error(at + '不是对象');
+        if (typeof line.text !== 'string') throw new Error(at + '缺少 text');
+        for (const k of ['role', 'model', 'voice', 'action']) {
+            if (line[k] !== undefined && typeof line[k] !== 'string') throw new Error(at + k + ' 须为字符串');
+        }
+        if (line.auto !== undefined && typeof line.auto !== 'boolean') throw new Error(at + 'auto 须为布尔值');
+        if (line.wait !== undefined && (!Number.isFinite(line.wait) || line.wait < 0)) {
+            throw new Error(at + 'wait 须为非负数');
+        }
+    });
+}
+
+async function listScenes() {
+    let names;
+    try { names = await readdir(SCENE_DIR); }
+    catch (err) { if (err.code === 'ENOENT') return []; throw err; }
+    const out = [];
+    for (const name of names.sort()) {
+        if (!SCENE_NAME.test(name)) continue;
+        let title = name;
+        try {
+            const data = JSON.parse(await readFile(join(SCENE_DIR, name), 'utf8'));
+            if (data && typeof data.title === 'string' && data.title) title = data.title;
+        } catch (_) { /* 坏文件仍列出，用文件名当标题 */ }
+        out.push({ file: name, title });
+    }
+    return out;
+}
+
+async function readStory(target) {
+    try { return await readFile(target.abs, 'utf8'); }
+    catch (err) { if (err.code === 'ENOENT') return null; throw err; }
+}
+
+/* 先写 .tmp 再 rename：中途出错不会留下半份剧本 */
+async function writeStory(target, data) {
+    const text = JSON.stringify(data, null, 2) + '\n';
+    await mkdir(target.kind === 'cast' ? STORY_DIR : SCENE_DIR, { recursive: true });
+    await writeFile(target.abs + '.tmp', text, 'utf8');
+    try {
+        await rename(target.abs + '.tmp', target.abs);
+    } catch (err) {
+        await unlink(target.abs + '.tmp').catch(() => {});
+        throw err;
+    }
+    return text;
+}
+
 /* ---------- 路由 ---------- */
 async function handleApi(req, res, pathname) {
     if (pathname === '/api/thumbs') {
@@ -289,6 +373,45 @@ async function handleApi(req, res, pathname) {
             return sendJson(res, 200, { ok: true, ...out });
         } catch (err) {
             return sendJson(res, 400, { ok: false, error: err.message });
+        }
+    }
+
+    if (pathname === '/api/story') {
+        const name = (new URL(req.url, 'http://127.0.0.1').searchParams.get('name') || '').trim();
+        let target = null;
+        if (name) {
+            try { target = storyTarget(name); }
+            catch (err) { return sendJson(res, 400, { ok: false, error: err.message }); }
+        }
+        if (req.method === 'GET' || req.method === 'HEAD') {
+            if (!target) {
+                try { return sendJson(res, 200, { ok: true, scenes: await listScenes() }); }
+                catch (err) { return sendJson(res, 500, { ok: false, error: err.message }); }
+            }
+            let text;
+            try { text = await readStory(target); }
+            catch (err) { return sendJson(res, 500, { ok: false, error: err.message }); }
+            if (text === null) return sendJson(res, 404, { ok: false, error: target.rel + ' 不存在' });
+            return send(res, 200, text, { 'Content-Type': 'application/json; charset=utf-8' });
+        }
+        if (req.method !== 'PUT') {
+            res.setHeader('Allow', 'GET, HEAD, PUT');
+            return sendJson(res, 405, { ok: false, error: '只支持 GET / PUT' });
+        }
+        if (!target) return sendJson(res, 400, { ok: false, error: 'PUT 需要 name 参数' });
+        let data;
+        try { data = JSON.parse(await readBody(req)); }
+        catch (err) { return sendJson(res, 400, { ok: false, error: '请求体不是合法 JSON：' + err.message }); }
+        try { validateStory(target.kind, data); }
+        catch (err) { return sendJson(res, 400, { ok: false, error: err.message }); }
+        try {
+            const text = await writeStory(target, data);
+            const when = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+            console.log(`[story] ${when} 写入 ${target.rel} ← ${Math.round(Buffer.byteLength(text) / 1024)}KB`);
+            return sendJson(res, 200, { ok: true, path: target.rel, bytes: Buffer.byteLength(text) });
+        } catch (err) {
+            console.error('[story] 写盘失败:', err.message);
+            return sendJson(res, 500, { ok: false, error: '写盘失败：' + err.message });
         }
     }
 
@@ -428,7 +551,8 @@ server.listen(PORT, HOST, () => {
     const home = `http://${HOST}:${PORT}/`;
     console.log('E-mote 本地服务已启动');
     console.log(`角色档案首页  ${home}`);
-    console.log(`场景页        ${home}steins_gate/index.html`);
+    console.log(`故事模式      ${home}story/index.html`);
+    console.log(`LAB 播放页    ${home}steins_gate/index.html`);
     console.log(`静态根目录  ${ROOT}`);
     console.log('Ctrl+C 停止');
     if (argv.includes('--open')) openBrowser(home);

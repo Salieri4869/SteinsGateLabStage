@@ -1,12 +1,12 @@
 // ============================================================
-//  model-loader.js —— 模型加载 + PSB 解析 + 手臂姿势配置（单文件）
+//  model_loader.js —— 模型加载 + PSB 解析 + 手臂姿势配置（单文件）
 //
 //  本文件独立承担三件事，不再依赖 emote-meta/ 下的任何模块：
 //    ① 下载并解压 pure.zip，得到原始 PSB 字节（fflate）
 //    ② 直接从这份字节里解析 PSB v4 结构区（约 1 MB），还原
 //       metadata / object / source 对象树
 //    ③ 从对象树算出互斥手臂组的贴图矩形、atlas 高度与姿势映射
-//  配置交给 gl-arm-pose.js，在 atlas 上传 GPU 时擦掉不用的那套手臂。
+//  配置交给 gl_arm_pose.js，在 atlas 上传 GPU 时擦掉不用的那套手臂。
 //
 //  SDK 三步契约（严格顺序，中间不改 canvas 尺寸）：
 //    ① EmotePlayer.createRenderCanvas(w, h)   // 固定字面量
@@ -20,7 +20,7 @@
 //  { ModelLoader, PsbReader, ArmPoseConfig }，供回归测试复用。
 //
 //  注意：交给 SDK 的是**未经任何修改**的原始 PSB，两套手臂 sprite
-//  仍在贴图里，由 gl-arm-pose.js 在纹理上传时贴补丁。
+//  仍在贴图里，由 gl_arm_pose.js 在纹理上传时贴补丁。
 // ============================================================
 
 // ============================================================
@@ -356,7 +356,7 @@ var ArmPoseConfig = (function () {
     }
 
     /**
-     * 由 PSB root 生成单个模型的配置（字段与 gl-arm-pose.js.configure 契约一致）
+     * 由 PSB root 生成单个模型的配置（字段与 gl_arm_pose.js.configure 契约一致）
      * @param {object} d          PSB root 对象（含 metadata / object / source）
      * @param {string} modelZip   模型 zip 文件名（用于回写 cfg.model）
      */
@@ -1211,7 +1211,7 @@ const ModelLoader = {
         });
     },
 
-    // ---- 手臂姿势：委托 gl-arm-pose.js -------------------------
+    // ---- 手臂姿势：委托 gl_arm_pose.js -------------------------
 
     _rawPsb: null,      // 交给 SDK 的那一份原始字节（仅引用，不做副本）
     _player: null,
@@ -1228,7 +1228,7 @@ const ModelLoader = {
     _requireGL() {
         const gl = typeof window !== 'undefined' ? window.ArmPoseGL : null;
         if (!gl || !gl.supported) {
-            throw new Error('[ModelLoader] gl-arm-pose.js 未加载或当前环境无 WebGL');
+            throw new Error('[ModelLoader] gl_arm_pose.js 未加载或当前环境无 WebGL');
         }
         return gl;
     },
@@ -1241,7 +1241,7 @@ const ModelLoader = {
     /**
      * 侧面板用：模型「全部」差分选择器 + 部件清单。
      * 惰性解析（只在面板首次打开时读一次结构区，约 10 ms），结果缓存。
-     * 每组 selector 会标注 gpu：true 表示由 gl-arm-pose.js 接管（用 setSelector），
+     * 每组 selector 会标注 gpu：true 表示由 gl_arm_pose.js 接管（用 setSelector），
      * false 表示是 3.9.8 原生认识的 fade 差分（用 setVariable 写 on/off 值）。
      */
     getModelInventory() {

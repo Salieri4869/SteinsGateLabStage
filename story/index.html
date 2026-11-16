@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-mode="play">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>剧情模式 · Amadeus Demo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+        body {
+            background: #07141a center center / cover no-repeat;
+            color: #e6f1ef;
+            font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+        }
+        #canvas {
+            display: block; position: fixed; inset: 0;
+            width: 100vw; height: 100vh; object-fit: contain;
+            background: transparent; border: none; outline: none;
+            z-index: 1; transition: opacity .25s ease;
+        }
+        html[data-mode="edit"] #canvas { opacity: .18; }
+
+        #st-bar {
+            position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 10;
+            display: flex; align-items: center; gap: 12px; padding: 0 16px;
+            background: rgba(4, 12, 17, .82); border-bottom: 1px solid rgba(99, 214, 196, .22);
+        }
+        .st-brand { font: 500 10px/1.6 ui-monospace, Consolas, monospace; letter-spacing: .28em; color: #63d6c4; }
+        #st-scene {
+            background: rgba(255,255,255,.06); color: #e6f1ef;
+            border: 1px solid rgba(99,214,196,.3); border-radius: 4px;
+            padding: 4px 8px; font-size: 12px; min-width: 200px;
+        }
+        #st-msg { font-size: 12px; color: #e9b96e; }
+        #st-msg:empty { display: none; }
+        #st-progress { font: 500 11px/1 ui-monospace, Consolas, monospace; color: rgba(230,241,239,.55); }
+        .st-spacer { flex: 1; }
+        .st-modes { display: flex; gap: 4px; }
+        .st-modes button, #st-save, #st-add-line {
+            background: transparent; color: #9fb8b4; cursor: pointer;
+            border: 1px solid rgba(99,214,196,.25); border-radius: 4px;
+            padding: 5px 14px; font-size: 12px;
+        }
+        #st-add-line { padding: 4px 10px; }
+        .st-modes button.is-active { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
+        #st-save[disabled] { opacity: .45; cursor: default; }
+
+        #st-textbox {
+            position: fixed; left: 6vw; right: 6vw; bottom: 5vh; z-index: 5;
+            min-height: 108px; padding: 16px 22px 14px;
+            background: rgba(4, 12, 17, .86); border: 1px solid rgba(99,214,196,.28);
+            border-radius: 8px; cursor: pointer;
+        }
+        html[data-mode="edit"] #st-textbox { display: none; }
+        #st-name { font-size: 12px; letter-spacing: .08em; color: #63d6c4; margin-bottom: 8px; }
+        #st-text { font-size: 16px; line-height: 1.7; min-height: 28px; }
+        #st-hint { text-align: right; font-size: 11px; color: rgba(230,241,239,.5); margin-top: 6px; }
+
+        /* ---- 编辑器 ---- */
+        #st-editor {
+            position: fixed; top: 44px; bottom: 0; left: 0; right: 0; z-index: 6;
+            display: none; gap: 12px; padding: 16px;
+            background: rgba(4, 12, 17, .72);
+        }
+        html[data-mode="edit"] #st-editor { display: flex; }
+        .st-col {
+            display: flex; flex-direction: column; min-width: 0; min-height: 0;
+            background: rgba(9, 24, 29, .94); border: 1px solid rgba(99,214,196,.2);
+            border-radius: 8px; padding: 14px;
+        }
+        .st-col--lines { flex: 1; }
+        .st-col--props { width: 348px; flex: none; }
+        .st-col-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+        .st-col h2 { font-size: 13px; font-weight: 500; color: #63d6c4; }
+
+        #st-lines {
+            flex: 1; min-height: 0; overflow-y: auto; list-style: none;
+            margin: 0 -6px; padding: 0 6px;
+        }
+        .st-line {
+            display: flex; align-items: center; gap: 8px;
+            padding: 7px 8px; margin-bottom: 2px; border-radius: 5px;
+            border: 1px solid transparent; cursor: pointer;
+        }
+        .st-line:hover { background: rgba(99,214,196,.07); }
+        .st-line.is-sel { background: rgba(99,214,196,.13); border-color: rgba(99,214,196,.4); }
+        .st-line.is-drag { opacity: .35; }
+        .st-grip {
+            flex: none; width: 8px; height: 14px; cursor: grab;
+            background-image: radial-gradient(circle, rgba(230,241,239,.45) 1px, transparent 1px);
+            background-size: 4px 4px;
+        }
+        .st-line-idx {
+            flex: none; width: 20px; text-align: right;
+            font: 500 10px/1 ui-monospace, Consolas, monospace; color: rgba(230,241,239,.4);
+        }
+        .st-line-role {
+            flex: none; width: 74px; font-size: 12px; color: #63d6c4;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .st-line-text {
+            flex: 1; min-width: 0; font-size: 12.5px; color: #cddad7;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .st-line-ops { flex: none; display: flex; gap: 3px; opacity: 0; transition: opacity .12s; }
+        .st-line:hover .st-line-ops, .st-line.is-sel .st-line-ops { opacity: 1; }
+        .st-line-ops button {
+            width: 20px; height: 20px; padding: 0; cursor: pointer;
+            background: transparent; color: #9fb8b4; font-size: 10px; line-height: 1;
+            border: 1px solid rgba(99,214,196,.25); border-radius: 3px;
+        }
+        .st-line-ops button:hover { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
+
+        #st-props { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+        .st-sec { margin-bottom: 18px; }
+        .st-sec h3 {
+            font-size: 11px; font-weight: 500; letter-spacing: .08em;
+            color: rgba(99,214,196,.85); margin-bottom: 8px;
+        }
+        .st-field { display: block; margin-bottom: 9px; font-size: 11px; color: rgba(230,241,239,.6); }
+        .st-field > span { display: block; margin-bottom: 4px; }
+        .st-field input, .st-field select, .st-field textarea {
+            width: 100%; background: rgba(0,0,0,.35); color: #dceae7;
+            border: 1px solid rgba(99,214,196,.2); border-radius: 4px;
+            padding: 6px 8px; font-size: 12px; font-family: inherit;
+        }
+        .st-field textarea { resize: vertical; min-height: 70px; line-height: 1.6; }
+        .st-field input:focus, .st-field select:focus, .st-field textarea:focus {
+            outline: none; border-color: rgba(99,214,196,.6);
+        }
+        .st-field select:disabled, .st-field input:disabled { opacity: .45; }
+        .st-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(230,241,239,.75); margin-bottom: 9px; }
+        .st-check input { accent-color: #63d6c4; width: 13px; height: 13px; }
+        #st-custom {
+            border-left: 2px solid rgba(99,214,196,.25);
+            padding-left: 10px; margin-bottom: 9px;
+        }
+
+        #st-loading {
+            position: fixed; inset: 0; z-index: 9999;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+            background: rgba(4, 10, 14, .94); transition: opacity .4s ease, visibility .4s ease;
+        }
+        html.st-ready #st-loading { opacity: 0; visibility: hidden; pointer-events: none; }
+        .st-load-kicker { font: 500 10px/1.6 ui-monospace, Consolas, monospace; letter-spacing: .3em; color: #63d6c4; }
+        #st-status { font-size: 13px; color: #dceae7; }
+        #st-status:empty { display: none; }
+    </style>
+
+    <!-- 加载顺序是 SDK 硬契约，与 steins_gate/index.html 保持一致 -->
+    <script src="../common/gl_arm_pose.js"></script>
+    <script src="../common/emote_config.js"></script>
+    <script src="../driver/emotedriver.js" charset="UTF-8"></script>
+    <script src="../driver/emoteplayer.js" charset="UTF-8"></script>
+    <script src="../libs/fflate.js"></script>
+    <script src="../common/model_loader.js"></script>
+    <script src="../common/lipsync.js"></script>
+    <script src="../common/config_validator.js"></script>
+    <script src="../common/action_config.js"></script>
+    <script src="../common/emote_core.js"></script>
+    <script src="story.js"></script>
+</head>
+<body onload="EmoteDriver_Launch(startStory)">
+    <div id="st-loading" role="status" aria-live="polite">
+        <div class="st-load-kicker">STORY MODE</div>
+        <div id="st-status">正在构筑世界线…</div>
+    </div>
+
+    <header id="st-bar">
+        <span class="st-brand">STORY MODE</span>
+        <select id="st-scene" aria-label="场景"></select>
+        <span id="st-msg"></span>
+        <span class="st-spacer"></span>
+        <span id="st-progress"></span>
+        <div class="st-modes">
+            <button type="button" data-mode="play" class="is-active">播放</button>
+            <button type="button" data-mode="edit">编辑</button>
+        </div>
+        <button type="button" id="st-save" hidden disabled>保存</button>
+    </header>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="st-textbox">
+        <div id="st-name"></div>
+        <div id="st-text"></div>
+        <div id="st-hint">点击继续 ▸</div>
+    </div>
+
+    <section id="st-editor">
+        <div class="st-col st-col--lines">
+            <div class="st-col-head">
+                <h2>剧本 · <span id="st-json-name"></span></h2>
+                <button type="button" id="st-add-line">＋ 新增行</button>
+            </div>
+            <ol id="st-lines"></ol>
+        </div>
+
+        <div class="st-col st-col--props">
+            <div id="st-props">
+                <div class="st-sec">
+                    <h3>场景</h3>
+                    <label class="st-field"><span>标题</span><input type="text" id="st-title"></label>
+                    <label class="st-field"><span>背景</span><select id="st-bg"></select></label>
+                </div>
+
+                <div class="st-sec">
+                    <h3>第 <span id="st-sel-idx">1</span> 行</h3>
+                    <label class="st-field"><span>角色</span><select id="st-role"></select></label>
+                    <label class="st-field"><span>文本</span><textarea id="st-line-text" rows="4"></textarea></label>
+                    <label class="st-field"><span>语音</span><select id="st-voice"></select></label>
+                    <label class="st-field"><span>动作</span><select id="st-action"></select></label>
+                    <div id="st-custom" hidden>
+                        <label class="st-field"><span>存为宏（填名字后离开输入框）</span><input type="text" id="st-macro-name" placeholder="如：惊讶"></label>
+                        <label class="st-field"><span>timeline</span><input type="text" id="st-macro-tl" list="st-tl-list"></label>
+                        <label class="st-field"><span>diffSlot1</span><select id="st-macro-diff"></select></label>
+                        <datalist id="st-tl-list"></datalist>
+                    </div>
+                    <label class="st-check"><input type="checkbox" id="st-auto"> 自动推进</label>
+                    <label class="st-field"><span>停顿（ms）</span><input type="number" id="st-wait" min="0" step="100" value="1200"></label>
+                </div>
+
+                <div class="st-sec">
+                    <h3>角色绑定（cast.json）</h3>
+                    <div id="st-cast-list"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+</body>
+</html>

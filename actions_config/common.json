@@ -1,5 +1,5 @@
 {
-  "doc": "公共动作 base。按模型名的专属配置放在 actions-config/<角色文件夹>/<模型名>.json，用 extends 稀疏覆盖；缺文件时本文件兜底。timeline/diffSlot 名字会在模型 attach 后按当前模型清单自动求解，audio 只在专属配置里写，避免串到其他角色的语音。",
+  "doc": "公共动作 base。按模型名的专属配置放在 actions_config/<角色文件夹>/<模型名>.json，用 extends 稀疏覆盖；缺文件时本文件兜底。timeline/diffSlot 名字会在模型 attach 后按当前模型清单自动求解，audio 只在专属配置里写，避免串到其他角色的语音。",
   "debug": true,
   "reactions": {
     "eye": {

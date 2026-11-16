@@ -1,13 +1,13 @@
 // ============================================================
-//  actions-config-loader.js —— 动作配置目录（镜像 data/）
+//  action_config.js —— 动作配置加载器（镜像 data/）
 //
 //  data/<角色>/<模型>.psb.m.pure.zip
-//      ↓ 去掉打包后缀（与 scene-ui.js 的 stripModelExt 同源）
-//  actions-config/<角色>/<模型>.json      ← 专属配置（可缺省）
-//  actions-config/common.json            ← 公共 base
+//      ↓ 去掉打包后缀（与 scene_ui.js 的 stripModelExt 同源）
+//  actions_config/<角色>/<模型>.json      ← 专属配置（可缺省）
+//  actions_config/common.json            ← 公共 base
 //
 //  两条来源按优先级：own（专属，与 common 稀疏合并）> common（通用兜底）
-//  「有没有专属配置」先查 actions-config/ 的 HTTP 目录索引（与 scene-ui.js 的
+//  「有没有专属配置」先查 actions_config/ 的 HTTP 目录索引（与 scene_ui.js 的
 //  模型/背景自动发现同源）：先判断再读取，不拿 HTTP 404 当缺省信号，
 //  所以正常路径根本不会发出会失败的请求。服务器不返回目录索引时才退回
 //  fetch 探测，保证任意静态托管下功能不变。
@@ -18,12 +18,12 @@
 (function (root) {
     'use strict';
 
-    var CONFIG_ROOT = '../actions-config/';
+    var CONFIG_ROOT = '../actions_config/';
 
-    // 与 scene-ui.js:44 的 RAW_PSB_EXT 完全同源；两处必须同步修改。
+    // 与 scene_ui.js:44 的 RAW_PSB_EXT 完全同源；两处必须同步修改。
     var RAW_PSB_EXT = /\.(?:psb\.m\.pure\.psb|psb\.m\.pure|psb\.m\.psb|pure\.psb|psb\.m|psb|pure)$/i;
 
-    /** 去掉打包后缀，得到「造型词」。优先复用 scene-ui.js 暴露的唯一实现。 */
+    /** 去掉打包后缀，得到「造型词」。优先复用 scene_ui.js 暴露的唯一实现。 */
     function stripModelExt(name) {
         var fn = root.SGStripModelExt;
         if (typeof fn === 'function') return fn(name);

@@ -26,8 +26,12 @@
       <a class="tab is-active" href="#overview" data-section="overview" aria-current="page">作品</a>
       <a class="tab" href="#characters" data-section="characters">角色</a>
       <a class="tab" href="#tech" data-section="tech">技术</a>
+      <a class="tab tab--story" href="story/index.html" title="进入角色剧情模式">
+        <span class="tab-main"><span class="tab-main-text">故事模式<span class="arrow" aria-hidden="true">&#8599;</span></span></span>
+        <span class="tab-en">STORY MODE</span>
+      </a>
       <a class="tab tab--lab" href="steins_gate/index.html" title="推开门，走进未来道具研究所">
-        <span class="tab-main">LAB <span class="arrow" aria-hidden="true">&#8599;</span></span>
+        <span class="tab-main"><span class="tab-main-text">LAB<span class="arrow" aria-hidden="true">&#8599;</span></span></span>
         <span class="tab-en">FUTURE GADGET</span>
       </a>
     </nav>
@@ -154,7 +158,7 @@
           <p><b>切换角色／造型：</b>在 <code>data/</code> 下建角色文件夹，把 <code>*.psb</code> 或 <code>*.zip</code>
              丢进去，刷新后自动出现在 tab 上；点角色 tab 展开造型面板，点造型才切换。</p>
           <p><b>调整顺序：</b>控制条「⇅ 排序」里拖行首的把手，或点 ▲▼，松手即写回
-             <code>actions-config/order.json</code>。用 <code>run.bat</code> 启动才能写盘，
+             <code>actions_config/order.json</code>。用 <code>run.bat</code> 启动才能写盘，
              普通静态服务下顺序只在本次浏览有效。</p>
           <p><b>切换背景：</b>「切换背景」打开预览面板，悬停看大图、点击即应用并记住选择。
              背景由浏览器运行时发现：直接把图片丢进 <code>background/</code>，面板点「↻ 重新扫描」就会读到；

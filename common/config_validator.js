@@ -1,5 +1,5 @@
 // ============================================================
-//  config-validator.js —— 动作配置校验（纯函数，环境无关）
+//  config_validator.js —— 动作配置校验（纯函数，环境无关）
 //
 //  reactions: { 部位key(=charaProfile 的 marker 名) → { radius, pool[] } }
 //  radius   : 占画布高度的比例（正数），运行时换算像素
@@ -9,9 +9,9 @@
 //
 //  用法：
 //    1) 浏览器 <script>      : window.validateActionsConfig
-//    2) Node require/import  : require('./config-validator.js')
-//    3) CLI 自测             : node config-validator.js
-//                             （直接校验 ../actions-config/ 下的 JSON，含 extends 合并）
+//    2) Node require/import  : require('./config_validator.js')
+//    3) CLI 自测             : node config_validator.js
+//                             （直接校验 ../actions_config/ 下的 JSON，含 extends 合并）
 // ============================================================
 
 /** 扁平化 reactions → 动作数组 */
@@ -125,13 +125,13 @@ function validateActionsConfig(config) {
 }
 
 // ============================================================
-//  CLI 自测入口：直接校验 actions-config/ 下的 JSON
+//  CLI 自测入口：直接校验 actions_config/ 下的 JSON
 // ============================================================
 function _runCliSelfTest() {
     const fs = require('fs');
     const path = require('path');
-    const root = path.join(__dirname, '..', 'actions-config');
-    const { mergeSparse } = require('./actions-config-loader.js');
+    const root = path.join(__dirname, '..', 'actions_config');
+    const { mergeSparse } = require('./action_config.js');
 
     const readJson = (p) => {
         try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
@@ -140,7 +140,7 @@ function _runCliSelfTest() {
 
     const common = readJson(path.join(root, 'common.json'));
     if (!common) {
-        console.error('❌ 缺少 actions-config/common.json');
+        console.error('❌ 缺少 actions_config/common.json');
         process.exitCode = 1;
         return;
     }

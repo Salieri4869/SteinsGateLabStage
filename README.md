@@ -11,12 +11,13 @@
 
 ## 内容
 
-仓库包含两个页面：
+首页 `index.html` 顶部有三个标签：「作品 / 角色 / 技术」是页内锚点，「故事模式 / LAB」通向两个独立页面：
 
 | 入口 | 说明 |
 |---|---|
 | `index.html` | 角色档案页（世界观介绍 + Labmem 名鉴），纯静态 |
-| `steins_gate/index.html` | E-mote 播放页（**主功能**），需要下方"运行前提"中的文件才能启动 |
+| `story/index.html` | **故事模式**：可视化编辑台词并播放，打字机 + 点击/自动推进 |
+| `steins_gate/index.html` | **LAB 播放页**：互动立绘（触摸反应、手臂姿势、口型同步），两个页面都需要下方「快速开始」中的文件才能启动 |
 
 ## 功能
 
@@ -24,10 +25,11 @@
 - **手臂姿势切换**：针对 PSB 4.0 的互斥追加部件（`insert` / `delete`），在 GPU 纹理上传阶段打补丁，擦除未选中的那套手臂。适用于只支持到 3.9.8 的 SDK 运行时。
 - **触摸反应**：按 `charaProfile` 部位（eye / mouth / bust / top …）划分命中区，命中后从动作池随机抽一条执行，可携带语音与变量插值。
 - **口型同步**：WebAudio 离线分析音频包络后按 rAF 查表驱动 `face_talk`；音频不可用时明确告警并跳过语音与口型，不提供第二条播放路径。
-- **场景 UI**：角色 tab 与造型面板、背景预览面板、tab 顺序调整；顺序写回 `actions-config/order.json`，背景与卡片统一读 `background/.thumbs/` 的 720p 缩略图。
+- **场景 UI**：角色 tab 与造型面板、背景预览面板、tab 顺序调整；顺序写回 `actions_config/order.json`，背景与卡片统一读 `background/.thumbs/` 的 720p 缩略图。
+- **故事模式**：`/story` 单页双模式，可视化编辑场景（行拖拽 / ▲▼ / 增删）与打字机播放器（点击 / 自动推进 / 语音 / 动作宏）；角色绑定写在 `story/cast.json`，场景存 `story/scenes/*.json`。
 - **开发者面板**：内置选择器 / 姿势 / 变量调试入口（`installDevPanel`）。
 
-## 运行前提
+## 快速开始
 
 **克隆本仓库后无法直接运行**，需要自备两类文件（均已被 `.gitignore` 排除）：
 
@@ -49,33 +51,42 @@ node main.mjs --port 8000     # 或 ./run.sh 8000（macOS / Linux / Git Bash）
 # 访问 http://127.0.0.1:8000/
 ```
 
-`main.mjs` 是零依赖静态服务（Node 18+）。相比 `python -m http.server` 多了两个写盘接口：
-调完角色顺序自动写回 `actions-config/order.json`，背景缩略图落到 `background/.thumbs/`。
-换成其他静态服务器也能跑，只是这两项退化为只读——排序只在本次会话有效，缩略图只用已有文件。
+启动后首页有三个页内锚点（作品 / 角色 / 技术）和两个模式入口：LAB 互动立绘、故事模式。故事模式需要语音时可把音频放到 `sounds/`（缺文件会静默跳过）。
+
+`main.mjs` 是零依赖静态服务（Node 18+，默认端口 8899；`run.bat` / `run.sh` 默认 8000）。相比 `python -m http.server` 多了三个写盘接口：
+角色顺序写回 `actions_config/order.json`，背景缩略图落到 `background/.thumbs/`，故事模式读写 `story/cast.json` 与 `story/scenes/*.json`。
+换成其他静态服务器也能跑，只是这三项退化为只读——排序只在本次会话有效，缩略图只用已有文件，剧本无法保存。
 
 ## 目录结构
 
 ```
 index.html                  角色档案页
-main.mjs                    本地服务：静态托管 + order / 缩略图写盘（零依赖）
+main.mjs                    本地服务：静态托管 + order / 缩略图 / 剧本写盘（零依赖）
 run.bat                     Windows 启动脚本（node main.mjs --port 8000 --open）
 run.sh                      macOS / Linux 启动脚本（./run.sh [port]，默认 8000）
-actions-config/             动作配置（镜像 data/ 的目录结构）
+actions_config/             动作配置（镜像 data/ 的目录结构）
   common.json                公共 base，无专属配置时兜底
   <角色>/<模型>.json         专属演出，文件名与模型去掉打包后缀后同名，可缺省
   order.json                 角色 tab 顺序，调序后自动写回
+common/                     播放页与剧情页共用的运行时
+  emote_core.js             内核：SDK 启动、动画循环、响应式布局（createLayout）
+  action_config.js          按模型名读取配置、稀疏继承、库存对齐
+  model_loader.js           PSB v4 解析 + 互斥部件配置 + 模型加载（单文件）
+  gl_arm_pose.js            纹理层手臂擦除（拦截 texImage2D / texSubImage2D）
+  lipsync.js                口型同步（WebAudio 离线分析 + rAF 查表）
+  emote_config.js           模型与动作基础配置
+  config_validator.js       配置 shape 校验（含 CLI 自测）
 steins_gate/
   index.html                播放页入口
-  main.js                   启动流程、画布布局、手臂切换、开发面板
-  model-loader.js           PSB v4 解析 + 互斥部件配置 + 模型加载（单文件）
-  gl-arm-pose.js            纹理层手臂擦除（拦截 texImage2D / texSubImage2D）
-  lipsync.js                口型同步（WebAudio 离线分析 + rAF 查表）
-  scene-ui.js               控制条、造型 / 排序 / 背景面板
-  actions-config-loader.js  按模型名读取配置、稀疏继承、库存对齐
-  emote-config.js           模型与动作基础配置
-  config-validator.js       配置 shape 校验（含 CLI 自测）
+  main.js                   启动流程、交互、手臂切换、开发面板
+  scene_ui.js               控制条、造型 / 排序 / 背景面板
   background/               背景图（不入库）
     .thumbs/                720p 缩略图，页面自动生成
+story/                      剧情模式：可视化编辑 + 播放
+  index.html                剧情页入口（单页双模式）
+  story.js                  场景读写、打字机播放器、行编辑器
+  cast.json                 角色 → 模型 / 语音目录 / 动作宏
+  scenes/                   场景 JSON
 driver/                     E-mote 运行时（不入库）
 libs/fflate.js              zip 解压（第三方）
 data/                       模型（不入库）
