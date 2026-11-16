@@ -28,9 +28,9 @@ const DEFAULT_HOLD_MS = 1000;
 // 一套手臂时自动跳过补丁、正常显示。setArmPose() 只改纹理，不重建
 // 模型实例，动画与物理连续，单次约 0.1s。
 // 模型由页面顶部的「角色 → 造型」tab 决定：优先 URL ?model=<角色/文件名>，
-// 其次本地记忆（上次点过哪个造型），都没有时取 data/ 扫描结果里的**第一个可用模型**
+// 其次本地记忆（上次点过哪个造型），都没有时取 character/data/ 扫描结果里的**第一个可用模型**
 // （顺序与 tab 完全一致），代码里不再硬编码任何模型路径。
-// 只接受「角色名/文件名」或纯文件名（旧链接兼容）；data/ 里的 .zip 与裸 .psb 都认，
+// 只接受「角色名/文件名」或纯文件名（旧链接兼容）；character/data/ 里的 .zip 与裸 .psb 都认，
 // 杜绝路径穿越。
 const MODEL_INDEX_KEY = 'sg-model-index-v1';
 
@@ -59,7 +59,7 @@ function firstIndexedPath() {
     }
     return '';
 }
-function toModelUrl(path) { return path ? '../data/' + path : ''; }
+function toModelUrl(path) { return path ? '../character/data/' + path : ''; }
 
 // 显式指定（URL / 本地记忆）能同步定下来；都没有时留空，交给 start() 问扫描结果
 const INITIAL_MODEL_URL = (function () {
@@ -83,7 +83,7 @@ if (typeof window !== 'undefined') {
 
 /* 自动模式：取扫描结果里的第一个可用模型。
    首次访问本地还没有索引，就等这一轮真实扫描（最多 2.5s），
-   保证「data/ 里放着什么就默认显示什么」。 */
+   保证「character/data/ 里放着什么就默认显示什么」。 */
 async function resolveModelUrl() {
     if (MODEL_PSB) return MODEL_PSB;
     const api = (typeof window !== 'undefined') ? window.SGSceneUI : null;
@@ -229,7 +229,7 @@ function rectOf(prof, key) {
     return { ax: Math.min(...xs), ay: Math.min(...ys), bx: Math.max(...xs), by: Math.max(...ys) };
 }
 
-/** 该部位能不能定位（供 actions_config 的库存对齐判断是否保留；与 _regionOf 的分层一一对应） */
+/** 该部位能不能定位（供 character/actions_config 的库存对齐判断是否保留；与 _regionOf 的分层一一对应） */
 function canPlacePart(player, key) {
     const prof = (player && player.charaProfile) || {};
     const hasRect = !!rectOf(prof, key);
@@ -1137,16 +1137,16 @@ function createConfig(actionsConfig, modelUrl) {
 async function start() {
     const hideLoading = () => { if (window.SG_LOADING) window.SG_LOADING.hide(); };
 
-    // 没指定模型时先问 data/ 的扫描结果：用第一个可用模型，不依赖任何写死的路径
+    // 没指定模型时先问 character/data/ 的扫描结果：用第一个可用模型，不依赖任何写死的路径
     const modelUrl = await resolveModelUrl();
     if (!modelUrl) {
         hideLoading();
-        console.error('❌ data/ 目录里没有找到可用的模型文件');
-        alert('没有找到可用的模型：请检查 data/<角色>/ 下是否有模型文件');
+        console.error('❌ character/data/ 目录里没有找到可用的模型文件');
+        alert('没有找到可用的模型：请检查 character/data/<角色>/ 下是否有模型文件');
         return;
     }
 
-    // 动作配置按 data/<角色>/<模型> 镜像推导 actions_config/<角色>/<模型>.json，
+    // 动作配置按 character/data/<角色>/<模型> 镜像推导 character/actions_config/<角色>/<模型>.json，
     // 与模型并行取；缺专属文件回退 common.json，两者都取不到就明确报错，不再静默无动作。
     let loaded;
     try {
@@ -1154,14 +1154,14 @@ async function start() {
     } catch (err) {
         console.error('[ActionsConfig] 配置目录加载异常', err);
         hideLoading();
-        alert('动作配置加载失败，请检查 actions_config/ 目录');
+        alert('动作配置加载失败，请检查 character/actions_config/ 目录');
         return;
     }
     const actionsConfig = loaded.config;
     if (!actionsConfig) {
         hideLoading();
-        console.error('❌ 未找到动作配置：actions_config/common.json');
-        alert('动作配置缺失，请检查 actions_config/common.json');
+        console.error('❌ 未找到动作配置：character/actions_config/common.json');
+        alert('动作配置缺失，请检查 character/actions_config/common.json');
         return;
     }
     if (!validateActionsConfigSafe(actionsConfig)) { hideLoading(); return; }

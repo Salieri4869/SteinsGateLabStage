@@ -21,12 +21,12 @@
 
 ## 功能
 
-- **模型直读**：直接解析 `.pure.psb`（PSB v4）二进制，无需反编译、无需预生成配置、无需构建步骤。模型放进 `data/<角色>/` 后自动出现在角色 tab；触摸反应按[动作配置指南](docs/动作配置指南.md)逐模型配置。
+- **模型直读**：直接解析 `.pure.psb`（PSB v4）二进制，无需反编译、无需预生成配置、无需构建步骤。模型放进 `character/data/<角色>/` 后自动出现在角色 tab；触摸反应按[动作配置指南](docs/动作配置指南.md)逐模型配置。
 - **手臂姿势切换**：针对 PSB 4.0 的互斥追加部件（`insert` / `delete`），在 GPU 纹理上传阶段打补丁，擦除未选中的那套手臂。适用于只支持到 3.9.8 的 SDK 运行时。
 - **触摸反应**：按 `charaProfile` 部位（eye / mouth / bust / top …）划分命中区，命中后从动作池随机抽一条执行，可携带语音与变量插值。
 - **口型同步**：WebAudio 离线分析音频包络后按 rAF 查表驱动 `face_talk`；音频不可用时明确告警并跳过语音与口型，不提供第二条播放路径。
-- **场景 UI**：角色 tab 与造型面板、背景预览面板、tab 顺序调整；顺序写回 `actions_config/order.json`，背景与卡片统一读 `background/.thumbs/` 的 720p 缩略图。
-- **故事模式**：`/story` 单页双模式，可视化编辑场景（行拖拽 / ▲▼ / 增删）与打字机播放器（点击 / 自动推进 / 语音 / 动作宏）；角色绑定写在 `story/cast.json`，场景存 `story/scenes/*.json`。
+- **场景 UI**：角色 tab 与造型面板、背景预览面板、tab 顺序调整；顺序写回 `character/actions_config/order.json`，背景与卡片统一读 `static/background/.thumbs/` 的 720p 缩略图。
+- **故事模式**：`/story` 单页双模式，可视化编辑场景（行拖拽 / ▲▼ / 增删）与打字机播放器（点击 / 自动推进 / 语音 / 动作宏）；角色绑定写在 `story/cast.json`，场景存 `story/scenes/*.json`。播放页的「即时台词」浮层可脱离剧本，直接输入文字 + 导入音频（或文字合成）让当前立绘开口说话。
 - **开发者面板**：内置选择器 / 姿势 / 变量调试入口（`installDevPanel`）。
 
 ## 快速开始
@@ -38,9 +38,9 @@
    - 获取方式：向 [M2 Co., Ltd.](https://emote.mtwo.co.jp/) 申请 E-mote SDK
    - ⚠️ 该 SDK 为专有软件，其条款禁止再分发。**请勿将 `driver/` 提交到任何公开仓库**，本项目亦不会提供。
 
-2. **模型与素材**，放到 `data/` 与 `steins_gate/background/`
-   - `data/<角色>/<名称>.pure.psb.zip` — 每个 zip 内含一个 `pure.psb`
-   - `steins_gate/background/` — 背景图，直接丢图片即可；`background/.thumbs/` 由页面自动生成，不用手放
+2. **模型与素材**，放到 `character/data/` 与 `static/background/`
+   - `character/data/<角色>/<名称>.pure.psb.zip` — 每个 zip 内含一个 `pure.psb`
+   - `static/background/` — 背景图，直接丢图片即可；`static/background/.thumbs/` 由页面自动生成，不用手放
    - 需从你合法持有的游戏副本中提取，本项目不提供任何素材。
 
 准备好后启动本地服务（`fetch` 加载要求 HTTP，不能直接开 `file://`）：
@@ -51,11 +51,23 @@ node main.mjs --port 8000     # 或 ./run.sh 8000（macOS / Linux / Git Bash）
 # 访问 http://127.0.0.1:8000/
 ```
 
-启动后首页有三个页内锚点（作品 / 角色 / 技术）和两个模式入口：LAB 互动立绘、故事模式。故事模式需要语音时可把音频放到 `sounds/`（缺文件会静默跳过）。
+启动后首页有三个页内锚点（作品 / 角色 / 技术）和两个模式入口：LAB 互动立绘、故事模式。故事模式需要语音时可把音频放到 `character/sounds/`（缺文件会静默跳过）。
 
-`main.mjs` 是零依赖静态服务（Node 18+，默认端口 8899；`run.bat` / `run.sh` 默认 8000）。相比 `python -m http.server` 多了三个写盘接口：
-角色顺序写回 `actions_config/order.json`，背景缩略图落到 `background/.thumbs/`，故事模式读写 `story/cast.json` 与 `story/scenes/*.json`。
-换成其他静态服务器也能跑，只是这三项退化为只读——排序只在本次会话有效，缩略图只用已有文件，剧本无法保存。
+`main.mjs` 是零依赖静态服务（Node 18+，默认端口 8899；`run.bat` / `run.sh` 默认 8000，服务只监听 127.0.0.1）。相比 `python -m http.server` 多了这些写盘接口：
+
+| 接口 | 作用 |
+|---|---|
+| `GET/PUT /api/order` | 读写角色顺序 `character/actions_config/order.json` |
+| `GET /api/thumbs`、`PUT /api/thumb` | 背景缩略图落到 `static/background/.thumbs/` |
+| `GET/PUT /api/story` | 读写 `story/cast.json` 与 `story/scenes/*.json` |
+| `GET /api/voice` | 列出即时台词音频（`story/voices/`） |
+| `GET /api/voice?name=…` | 流式播放音频，支持 Range（可拖动进度） |
+| `POST /api/voice`（octet-stream） | 导入音频，上限 12MB |
+| `POST /api/voice`（json） | 文字 → 语音合成（TTS 预留，`{"text":"…"}`） |
+
+**即时台词的语音来源**：默认走「导入音频」——在面板里选本地音频上传即可，无需额外依赖。「文字合成」是 TTS 预留接口：设置环境变量 `EMOTE_TTS_BIN`（如 `edge-tts`）和可选的 `EMOTE_TTS_VOICE`（默认 `zh-CN-XiaoxiaoNeural`）后启用，未配置时接口返回 501、前端提示改用导入音频。外部命令需支持 `--voice <名> --text <文字> --write-media <文件>` 参数。
+
+换成其他静态服务器也能跑，只是写盘能力退化为只读——排序只在本次会话有效，缩略图只用已有文件，剧本无法保存，即时台词无法导入音频。
 
 ## 目录结构
 
@@ -64,10 +76,13 @@ index.html                  角色档案页
 main.mjs                    本地服务：静态托管 + order / 缩略图 / 剧本写盘（零依赖）
 run.bat                     Windows 启动脚本（node main.mjs --port 8000 --open）
 run.sh                      macOS / Linux 启动脚本（./run.sh [port]，默认 8000）
-actions_config/             动作配置（镜像 data/ 的目录结构）
-  common.json                公共 base，无专属配置时兜底
-  <角色>/<模型>.json         专属演出，文件名与模型去掉打包后缀后同名，可缺省
-  order.json                 角色 tab 顺序，调序后自动写回
+character/                  角色资源
+  data/                      模型（不入库），<角色>/<模型> 两级结构
+  sounds/                    语音素材（不入库）
+  actions_config/            动作配置（镜像 data/ 的目录结构）
+    common.json              公共 base，无专属配置时兜底
+    <角色>/<模型>.json       专属演出，文件名与模型去掉打包后缀后同名，可缺省
+    order.json               角色 tab 顺序，调序后自动写回
 common/                     播放页与剧情页共用的运行时
   emote_core.js             内核：SDK 启动、动画循环、响应式布局（createLayout）
   action_config.js          按模型名读取配置、稀疏继承、库存对齐
@@ -80,6 +95,8 @@ steins_gate/
   index.html                播放页入口
   main.js                   启动流程、交互、手臂切换、开发面板
   scene_ui.js               控制条、造型 / 排序 / 背景面板
+static/                     静态资源
+  css/  js/                 样式与脚本
   background/               背景图（不入库）
     .thumbs/                720p 缩略图，页面自动生成
 story/                      剧情模式：可视化编辑 + 播放
@@ -87,10 +104,9 @@ story/                      剧情模式：可视化编辑 + 播放
   story.js                  场景读写、打字机播放器、行编辑器
   cast.json                 角色 → 模型 / 语音目录 / 动作宏
   scenes/                   场景 JSON
+  voices/                   即时台词导入的音频（页面生成，可入库）
 driver/                     E-mote 运行时（不入库）
 libs/fflate.js              zip 解压（第三方）
-data/                       模型（不入库）
-sounds/                     语音（不入库）
 docs/                       技术文档
 ```
 
@@ -119,7 +135,7 @@ wasm 导出了 83 个 `EmotePlayer_*` / `EmoteDevice_*`，其中 `emoteplayer.js
 - 仅支持未加密、未压缩的 PSB v4 `pure.psb`。遇到 MDF / PSZ 加密壳、PSB v3 或其他平台导出，需要扩展头部与壳处理。
 - 依赖 3.9.8 运行时；未来 SDK 版本行为变化可能影响纹理补丁的假设。
 - 触摸命中区依赖模型自身的 `charaProfile`，缺失时降级为无反应。
-- 缩略图按原图文件名存放（`background/.thumbs/<原名>.jpg`），用同名新图替换原图后旧缩略图不会自动失效，删掉对应文件即可重新生成。
+- 缩略图按原图文件名存放（`static/background/.thumbs/<原名>.jpg`），用同名新图替换原图后旧缩略图不会自动失效，删掉对应文件即可重新生成。
 
 ## 参考与致谢
 

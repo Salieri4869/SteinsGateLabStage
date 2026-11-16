@@ -29,7 +29,8 @@
         ctx: null, idx: 0, mode: 'play', ended: false, stale: false,
         sel: 0, typing: false, typeTimer: null, autoTimer: null,
         typeDone: null, seq: 0, lineStart: 0,
-        bg: null, models: null, voices: {}
+        bg: null, models: null, voices: {},
+        liveOpen: false, liveSrc: 'file', liveBusy: false, liveRole: '', voiceLib: []
     };
     var audio = null;
 
@@ -97,7 +98,7 @@
     var MODEL_RE = /(\.zip|\.psb|\.psb\.m)$/i;
 
     async function loadBackgrounds() {
-        var items = await listDir('../steins_gate/background/');
+        var items = await listDir('../static/background/');
         state.bg = items.filter(function (x) { return !x.isDir && IMG_RE.test(x.name); })
             .map(function (x) { return x.name; });
         if (state.scene && state.mode === 'edit') renderProps();
@@ -112,13 +113,13 @@
             .map(function (x) { return x.name; });
         if (state.mode === 'edit') renderProps();
     }
-    /* data/ 是两级结构：角色文件夹 → 模型文件。cast 的键是昵称（红莉栖），
+    /* character/data/ 是两级结构：角色文件夹 → 模型文件。cast 的键是昵称（红莉栖），
        文件夹名是完整姓名（牧瀬紅莉栖），两者对不上，所以这里返回全部分组，
        由下拉里的 optgroup 呈现，用户直接按文件夹找人。 */
     async function loadModels() {
-        var roots = (await listDir('../data/')).filter(function (x) { return x.isDir; });
+        var roots = (await listDir('../character/data/')).filter(function (x) { return x.isDir; });
         var groups = await Promise.all(roots.map(async function (d) {
-            var files = await listDir('../data/' + encodeURIComponent(d.name) + '/');
+            var files = await listDir('../character/data/' + encodeURIComponent(d.name) + '/');
             return {
                 folder: d.name,
                 models: files.filter(function (f) { return !f.isDir && MODEL_RE.test(f.name); })
@@ -149,7 +150,7 @@
 
     function applyBackground(name) {
         document.body.style.backgroundImage = name
-            ? 'url("../steins_gate/background/' + encodeURIComponent(name) + '")'
+            ? 'url("../static/background/' + encodeURIComponent(name) + '")'
             : '';
     }
 
@@ -278,6 +279,202 @@
         if (state.ended) { renderLine(0); return; }
         if (state.idx + 1 >= lines().length) { showEnd(); return; }
         renderLine(state.idx + 1);
+    }
+
+    /* ---------- 即时台词（独立于剧本，让当前立绘开口） ----------
+       语音走本地服务 /api/voice：POST 导入音频（octet-stream）或文字合成 TTS（json）；
+       GET?name=… 流式播放；未配 TTS 引擎时合成返回 501，前端提示降级。
+       当前立绘由场景加载，角色下拉只决定动作宏集合——换造型仍走场景/剧本。 */
+
+    function liveMsg(text, isErr) {
+        var el = $('st-live-msg');
+        el.textContent = text || '';
+        el.classList.toggle('err', !!isErr);
+    }
+
+    function initLive() {
+        // 角色下拉：来自 cast.json；默认选当前立绘对应角色
+        var roles = Object.keys(state.cast || {}).filter(function (k) { return k !== 'doc'; });
+        var current = '';
+        var line0 = lines()[0];
+        if (line0 && line0.role && roles.indexOf(line0.role) >= 0) current = line0.role;
+        if (!current) current = roles[0] || '';
+        state.liveRole = current;
+        fillSelect($('st-live-role'), roles, current, '');
+        renderLiveActions();
+
+        // 动作下拉（来自所选角色的 actions）
+        $('st-live-role').addEventListener('change', function () {
+            state.liveRole = this.value;
+            renderLiveActions();
+        });
+        // 三个来源 tab
+        var tabs = document.querySelectorAll('#st-live .st-live-tabs button');
+        for (var i = 0; i < tabs.length; i++) {
+            tabs[i].addEventListener('click', function () {
+                setLiveSrc(this.getAttribute('data-src'));
+            });
+        }
+        $('st-live-refresh').addEventListener('click', loadVoiceLib);
+        $('st-live-toggle').addEventListener('click', toggleLive);
+        $('st-live-close').addEventListener('click', closeLive);
+        $('st-live-say').addEventListener('click', liveSay);
+        $('st-live-stop').addEventListener('click', liveStop);
+        $('st-live-file').addEventListener('change', function () {
+            liveMsg(this.files && this.files[0] ? '已选：' + this.files[0].name : '');
+        });
+    }
+
+    function renderLiveActions() {
+        var item = state.cast && state.cast[state.liveRole];
+        var acts = (item && item.actions) ? Object.keys(item.actions) : [];
+        fillSelect($('st-live-action'), acts, '', '（无动作）');
+    }
+
+    function setLiveSrc(src) {
+        state.liveSrc = src;
+        var tabs = document.querySelectorAll('#st-live .st-live-tabs button');
+        for (var i = 0; i < tabs.length; i++) {
+            tabs[i].classList.toggle('is-active', tabs[i].getAttribute('data-src') === src);
+        }
+        var panes = document.querySelectorAll('#st-live [data-src-pane]');
+        for (var j = 0; j < panes.length; j++) {
+            panes[j].hidden = panes[j].getAttribute('data-src-pane') !== src;
+        }
+        liveMsg('');
+        if (src === 'lib') loadVoiceLib();
+    }
+
+    function toggleLive() {
+        if (state.liveOpen) closeLive(); else openLive();
+    }
+    function openLive() {
+        if (state.mode === 'edit') setMode('play');
+        state.liveOpen = true;
+        $('st-live').hidden = false;
+        $('st-live-toggle').classList.add('is-active');
+        // 打开时冻结剧本当前行，避免打字机把台词覆盖
+        clearTimers();
+        if (state.ctx && audio) audio.stop();
+        $('st-name').textContent = state.liveRole || '';
+        $('st-text').textContent = '';
+        setHint('即时台词模式');
+        liveMsg('');
+    }
+    function closeLive() {
+        state.liveOpen = false;
+        state.liveBusy = false;
+        $('st-live').hidden = true;
+        $('st-live-toggle').classList.remove('is-active');
+        if (audio) audio.stop();
+        // 回到剧本：重渲染当前行
+        if (state.mode === 'play') renderLine(state.idx);
+    }
+
+    async function loadVoiceLib() {
+        try {
+            var r = await fetch('/api/voice', { cache: 'no-store' });
+            var j = await r.json();
+            state.voiceLib = j.files || [];
+            fillSelect($('st-live-lib'), state.voiceLib, $('st-live-lib').value, '（无音频，请先导入）');
+        } catch (err) {
+            liveMsg('读取音频列表失败：' + err.message, true);
+        }
+    }
+
+    /* 把本地文件导入到服务端 voices/，返回可播放 URL */
+    function importSelectedVoice() {
+        var f = $('st-live-file').files && $('st-live-file').files[0];
+        if (!f) return Promise.reject(new Error('请先选择一个音频文件'));
+        var ext = (f.name.split('.').pop() || 'opus').toLowerCase();
+        var name = 'live-' + Date.now() + '.' + ext;
+        return fetch('/api/voice?name=' + encodeURIComponent(name), {
+            method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f
+        }).then(function (r) { return r.json().then(function (j) { return { r: r, j: j }; }); })
+          .then(function (x) {
+              if (!x.r.ok || !x.j.ok) throw new Error(x.j.error || ('导入失败 ' + x.r.status));
+              return x.j.url;
+          });
+    }
+
+    function voiceUrlForPlay() {
+        if (state.liveSrc === 'file') return importSelectedVoice();
+        if (state.liveSrc === 'lib') {
+            var name = $('st-live-lib').value;
+            return Promise.resolve(name
+                ? '/api/voice?name=' + encodeURIComponent(name)
+                : Promise.reject(new Error('请先导入并选择音频')));
+        }
+        // tts：POST 文字合成，拿返回的音频 URL
+        var text = ($('st-live-text').value || '').trim();
+        if (!text) return Promise.reject(new Error('请先输入文字'));
+        return fetch('/api/voice', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text })
+        }).then(function (r) { return r.json().then(function (j) { return { r: r, j: j }; }); })
+          .then(function (x) {
+              if (x.r.status === 501) throw new Error(x.j.error || 'TTS 未配置');
+              if (!x.r.ok || !x.j.ok) throw new Error(x.j.error || ('合成失败 ' + x.r.status));
+              return x.j.url;
+          });
+    }
+
+    async function liveSay() {
+        if (!state.liveOpen) openLive();
+        if (!audio || !state.ctx) { liveMsg('立绘尚未就绪', true); return; }
+        var text = $('st-live-text').value || '';
+        liveStop();
+
+        // 语音 URL（可能是异步上传/合成）；任一来源失败就只打字、不说话
+        var urlPromise;
+        try { urlPromise = voiceUrlForPlay(); }
+        catch (err) { urlPromise = Promise.reject(err); }
+
+        // 打字机 + 显示名字
+        $('st-name').textContent = state.liveRole || '';
+        var mySeq = ++state.seq;
+        state.liveBusy = true;
+        $('st-live-say').disabled = true;
+        $('st-live-stop').disabled = false;
+        liveMsg('');
+
+        Promise.resolve(urlPromise).then(function (url) {
+            if (!url || mySeq !== state.seq) return;
+            liveMsg('播放中…');
+            return audio.loadAndPlay(url).then(function () {
+                if (mySeq === state.seq) liveMsg('播放完成');
+            });
+        }).catch(function (err) {
+            if (mySeq === state.seq) liveMsg(err.message || '语音播放失败', true);
+        });
+
+        var el = $('st-text');
+        el.textContent = '';
+        var i = 0;
+        (function tick() {
+            if (mySeq !== state.seq) return;
+            if (i >= text.length) { finishLive(); return; }
+            el.textContent += text.charAt(i++);
+            state.typeTimer = setTimeout(tick, TYPE_MS);
+        })();
+        // 动作宏
+        var act = $('st-live-action').value;
+        if (act) applyAction({ action: act }, state.liveRole);
+    }
+
+    function finishLive() {
+        state.liveBusy = false;
+        if (state.typeTimer) { clearTimeout(state.typeTimer); state.typeTimer = null; }
+        $('st-live-say').disabled = false;
+        $('st-live-stop').disabled = true;
+        setHint('即时台词模式');
+    }
+
+    function liveStop() {
+        state.seq++;
+        finishLive();
+        if (audio) audio.stop();
+        liveMsg('已停止');
     }
 
     /* ---------- 编辑器 ---------- */
@@ -521,6 +718,7 @@
     /* ---------- 模式与场景 ---------- */
 
     function setMode(mode) {
+        if (mode === 'edit' && state.liveOpen) closeLive();
         state.mode = mode;
         root.setAttribute('data-mode', mode);
         var buttons = document.querySelectorAll('.st-modes button');
@@ -761,7 +959,10 @@
         var modeBtn = target.closest && target.closest('.st-modes button');
         if (modeBtn) { setMode(modeBtn.getAttribute('data-mode')); return; }
         if (target.closest && target.closest('#st-save')) { saveCurrent(); return; }
+        // 即时台词面板内的点击交给面板自己处理，不推进剧本
+        if (target.closest && target.closest('#st-live')) return;
         if (state.mode !== 'edit') {
+            if (state.liveOpen) return;      // 即时台词打开时冻结剧本推进
             if (target.closest && target.closest('#st-bar')) return;
             step();
             return;
@@ -784,7 +985,9 @@
     });
 
     document.addEventListener('keydown', function (evt) {
-        if (state.mode !== 'play') return;
+        if (state.mode !== 'play' || state.liveOpen) return;
+        // 正在文本框/面板里输入时不劫持按键
+        if (evt.target && /^(INPUT|TEXTAREA|SELECT)$/.test(evt.target.tagName)) return;
         if (evt.key === ' ' || evt.key === 'Enter' || evt.key === 'ArrowRight') {
             evt.preventDefault();
             step();
@@ -805,7 +1008,7 @@
             $('st-save').disabled = false;
             state.ctx = await window.SGEmoteCore.create({
                 canvas: $('canvas'),
-                modelUrl: '../data/' + state.model
+                modelUrl: '../character/data/' + state.model
             });
             window.ST_CORE = state.ctx;
             /* 立绘垂直略偏上，给底部文本框让位 */
@@ -826,6 +1029,7 @@
             $('st-status').textContent = '';
             root.classList.add('st-ready');
             renderLine(0);
+            initLive();
             loadBackgrounds();
             loadModels();
         } catch (err) {

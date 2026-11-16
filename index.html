@@ -116,7 +116,6 @@
       <div class="sec-head">
         <span class="sec-idx">03 /</span>
         <h2 id="tech-title">技术实现与运行说明</h2>
-        <p>以下内容仅面向站点维护，与作品剧情无关</p>
       </div>
 
       <div class="tech-cards" aria-label="实现要点">
@@ -142,11 +141,12 @@
       <div class="tech-grid">
         <ul class="tech-list">
           <li><b>steins_gate/</b><span>研究所页面与全部业务脚本；<code>index.html</code> 为入口</span></li>
-          <li><b>background/</b><span>背景图片</span></li>
+          <li><b>story/</b><span>剧情模式：可视化编辑与播放；<code>index.html</code> 为入口</span></li>
+          <li><b>character/</b><span>角色资源：<code>data/</code> 模型、<code>sounds/</code> 语音、<code>actions_config/</code> 动作配置</span></li>
+          <li><b>static/</b><span><code>background/</code> 背景图片与 <code>css/</code>、<code>js/</code> 静态资源</span></li>
           <li><b>driver/</b><span>官方 SDK（<code>emotedriver.js</code> / <code>emoteplayer.js</code> / wasm）</span></li>
-          <li><b>data/</b><span><code>*.psb</code> 模型</span></li>
           <li><b>libs/</b><span>fflate 解压库</span></li>
-          <li><b>sounds/</b><span>语音素材</span></li>
+          <li><b>docs/</b><span>技术文档（手臂姿势修复与动作配置指南）</span></li>
         </ul>
         <div class="note">
           <h3>研究所页面怎么玩</h3>
@@ -155,21 +155,21 @@
             「← 主页 ／ ▼ 显示控制条」，点提示条任意处或按 <code>ESC</code> 都能立刻展开。</p>
           <p><b>返回主页：</b>控制条最左侧的「← 主页」可一键回到作品介绍页；控制条收起时，
              顶部滑出的提示条里也保留同一个主页入口。</p>
-          <p><b>切换角色／造型：</b>在 <code>data/</code> 下建角色文件夹，把 <code>*.psb</code> 或 <code>*.zip</code>
+          <p><b>切换角色／造型：</b>在 <code>character/data/</code> 下建角色文件夹，把 <code>*.psb</code> 或 <code>*.zip</code>
              丢进去，刷新后自动出现在 tab 上；点角色 tab 展开造型面板，点造型才切换。</p>
           <p><b>调整顺序：</b>控制条「⇅ 排序」里拖行首的把手，或点 ▲▼，松手即写回
-             <code>actions_config/order.json</code>。用 <code>run.bat</code> 启动才能写盘，
+             <code>character/actions_config/order.json</code>。用 <code>run.bat</code> 启动才能写盘，
              普通静态服务下顺序只在本次浏览有效。</p>
           <p><b>切换背景：</b>「切换背景」打开预览面板，悬停看大图、点击即应用并记住选择。
-             背景由浏览器运行时发现：直接把图片丢进 <code>background/</code>，面板点「↻ 重新扫描」就会读到；
-             缩略图由页面生成一次、写进 <code>background/.thumbs/</code>，之后卡片与预览都读这张 720p 小图。
+             背景由浏览器运行时发现：直接把图片丢进 <code>static/background/</code>，面板点「↻ 重新扫描」就会读到；
+             缩略图由页面生成一次、写进 <code>static/background/.thumbs/</code>，之后卡片与预览都读这张 720p 小图。
              分组与标签按文件名推断。若服务器不返回目录索引，面板会出现「导入文件夹」，手动选一次即可。</p>
           <p><b>控制台：</b>页面右侧竖条，展开后可调整差分、变量、部件与时间线。面板从顶部控制条下方开始，
              与造型／排序／背景面板互斥；按 <code>ESC</code> 会按
              「排序 → 造型 → 背景 → 控制台 → 顶部控制条」的顺序逐层收起。</p>
           <p><b>扩充名鉴／角色：</b>名鉴由本页底部的 <code>LABMEM</code> 与 <code>OTHERS</code> 两份名簿驱动，
              追加角色只需在对应数组加一行（有编号 / 无编号）。研究所页面里的造型不用登记，
-             放进 <code>data/</code> 就会被扫描到。</p>
+             放进 <code>character/data/</code> 就会被扫描到。</p>
           <p>由于 wasm 与 zip 通过 fetch 加载，直接以 <code>file://</code> 打开会被浏览器拦截，
              请双击 <code>run.bat</code>（或执行 <code>node main.mjs --port 8000</code>）启动本地服务后访问本页。</p>
           <div class="doc-links">

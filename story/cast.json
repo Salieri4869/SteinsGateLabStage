@@ -1,8 +1,8 @@
 {
-  "doc": "角色绑定表。剧本只引用角色名与动作名；模型、语音目录、动作宏统一在此绑定，换造型时只改这里。model 为 data/ 下的「角色/文件名」；voiceDir 为相对 /story/ 的语音 URL 前缀；actions 的字段与 actions_config 的 pool 项同构（timeline / diffSlot1 / diffSlot2 / variables / duration）。",
+  "doc": "角色绑定表。剧本只引用角色名与动作名；模型、语音目录、动作宏统一在此绑定，换造型时只改这里。model 为 character/data/ 下的「角色/文件名」；voiceDir 为相对 /story/ 的语音 URL 前缀；actions 的字段与 character/actions_config 的 pool 项同构（timeline / diffSlot1 / diffSlot2 / variables / duration）。",
   "红莉栖": {
     "model": "牧瀬紅莉栖/牧瀬紅莉栖ab_白衣.psb.m.pure.zip",
-    "voiceDir": "../sounds/krs/",
+    "voiceDir": "../character/sounds/krs/",
     "actions": {
       "平常": {
         "timeline": "表情_普通"

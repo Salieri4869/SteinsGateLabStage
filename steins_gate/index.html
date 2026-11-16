@@ -56,7 +56,7 @@
         html, body {
             width: 100%; height: 100%;
             overflow: hidden;
-            background: url('background/background.jpg') center center / cover no-repeat;
+            background: url('../static/background/background.jpg') center center / cover no-repeat;
             display: flex; justify-content: center; align-items: center;
         }
         #canvas {
@@ -142,7 +142,7 @@
         5) model_loader.js —— 下载/解压 zip、解析 PSB 结构、算姿势配置，
                               必须在业务脚本之前
         6) 业务脚本（config_validator / action_config / main / scene_ui）
-           动作配置不再由 JS 提供，改为 main.js 启动时按模型名读取 ../actions_config/
+           动作配置不再由 JS 提供，改为 main.js 启动时按模型名读取 ../character/actions_config/
         公共模块统一放在 ../common/，播放页与 /story 共用同一份；
         emote_core.js 必须在 main.js 之前（main.js 的 start() 调它启动 SDK）。
     -->

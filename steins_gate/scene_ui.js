@@ -5,19 +5,19 @@
 //  切换背景 / ▲ 隐藏；收起后鼠标移入页面顶端滑出「▼ 显示控制条」。
 //
 //  数据来源：
-//    角色与造型  ../data/ 的目录索引，文件夹名即角色名，文件名即造型名。
+//    角色与造型  ../character/data/ 的目录索引，文件夹名即角色名，文件名即造型名。
 //                支持 *.zip 与裸 PSB（*.psb / *.psb.m / *.pure.psb）；
 //                目录索引不可用时用 localStorage 里的上次扫描结果兜底。
-//    tab 顺序    actions_config/order.json 的 roles，缺省按名字排。
-//    造型显示名  actions_config/<角色>/<词干>.json 的 name。
-//    背景        background/ 的目录索引，文件名推断分组与标签。
+//    tab 顺序    character/actions_config/order.json 的 roles，缺省按名字排。
+//    造型显示名  character/actions_config/<角色>/<词干>.json 的 name。
+//    背景        static/background/ 的目录索引，文件名推断分组与标签。
 //
 //  右侧面板四选一：造型 / 排序 / 背景 / 控制台，开一个收掉其余。
 //  ESC 逐层收起：排序 → 造型 → 背景 → 控制台 → 控制条。
 //
 //  写盘能力由 main.mjs 提供（响应头 X-Emote-Server: node），两个接口：
-//    PUT /api/order  调序后 300ms 防抖写回 actions_config/order.json
-//    PUT /api/thumb  背景生成 1280×720 缩略图写进 background/.thumbs/
+//    PUT /api/order  调序后 300ms 防抖写回 character/actions_config/order.json
+//    PUT /api/thumb  背景生成 1280×720 缩略图写进 static/background/.thumbs/
 //  没有写盘接口时：排序只留本次会话，缩略图只读已有文件，界面照实提示。
 //
 //  只做 UI，不碰 E-mote 渲染与 canvas。
@@ -25,15 +25,15 @@
 (function () {
     'use strict';
 
-    // 角色与造型来自 ../data/ 的目录索引：丢文件即出现，显示名由文件名推断；
-    // 要单独改名就写 actions_config/<角色>/<模型>.json 的 "name"。
+    // 角色与造型来自 ../character/data/ 的目录索引：丢文件即出现，显示名由文件名推断；
+    // 要单独改名就写 character/actions_config/<角色>/<模型>.json 的 "name"。
     /* 裸 PSB（不压缩，直接把文件丢进角色文件夹，如 柳木詩夢/shi_45.pure.psb）。
        备选分支必须由长到短，否则 ".psb" 会抢先匹配、只剥掉一层后缀，
        剩下的 ".psb.m.pure" 会被当成造型名。 */
     var RAW_PSB_EXT = /\.(?:psb\.m\.pure\.psb|psb\.m\.pure|psb\.m\.psb|pure\.psb|psb\.m|psb|pure)$/i;
     var AUX_PSB_EXT = /\.resx\.psb$/i;             // 附属资源（图标 / 余项），不是可加载模型
     function isRawModel(name) { return !AUX_PSB_EXT.test(name) && RAW_PSB_EXT.test(name); }
-    /* data/ 里的都是模型，所以任何 .zip 都算：内部含 .psb 即可，ModelLoader 按 magic 解压 */
+    /* character/data/ 里的都是模型，所以任何 .zip 都算：内部含 .psb 即可，ModelLoader 按 magic 解压 */
     function isModelFile(name) {
         return /\.zip$/i.test(name) || isRawModel(name);
     }
@@ -46,9 +46,9 @@
     window.SGStripModelExt = stripModelExt;
     var MODEL_KNOWN_KEY = 'sg-models-known-v1';    // 上次扫描到的全部造型路径（基线）
     var MODEL_UNREAD_KEY = 'sg-models-unread-v1';  // 新增、但还没打开看过的造型路径
-    var CONFIG_ROOT = '../actions_config/';        // 造型显示名 / 角色顺序的可选来源
+    var CONFIG_ROOT = '../character/actions_config/';  // 造型显示名 / 角色顺序的可选来源
     var modelNames = {};           // '<角色>/<词干>' → 配置 JSON 里的 name（造型显示名）
-    /* 角色 tab 顺序：只认 actions_config/order.json（写文件夹名，其余自动追加）。
+    /* 角色 tab 顺序：只认 character/actions_config/order.json（写文件夹名，其余自动追加）。
        面板里调完自动写回文件；文件没有就退回纯自动序。 */
     var roleOrder = [];            // 生效顺序（order.json 的 roles + 还没写盘的调整）
     var roleOrderSource = [];      // 文件里的原始 roles，「重置」和未保存判定用它
@@ -69,7 +69,7 @@
     ];
 
     var IMG_EXTS = /\.(png|jpe?g|webp|gif|bmp)$/i;
-    // 上次扫描到的文件名（用来标 NEW）；缩略图不放浏览器，全部落盘 background/.thumbs/
+    // 上次扫描到的文件名（用来标 NEW）；缩略图不放浏览器，全部落盘 static/background/.thumbs/
     var KNOWN_KEY = 'sg-bg-known-v1';
 
     var CSS = [
@@ -146,7 +146,7 @@
         '.sg-model.is-current i{color:#8fd8cd}',
         '.sg-model.is-current::before{content:"●";position:absolute;right:5px;top:4px;',
         ' color:#63d6c4;font-size:9px;line-height:1}',
-        // 刚放进 data/ 的模型：金色描边 + 右上角 NEW 角标，排在最前，一眼能找到
+        // 刚放进 character/data/ 的模型：金色描边 + 右上角 NEW 角标，排在最前，一眼能找到
         '.sg-model.is-new{border-color:rgba(233,185,110,.6);background:#241f16}',
         '.sg-model.is-new i{color:#c9a76e}',
         '.sg-model.is-new::after{content:"NEW";position:absolute;right:3px;top:3px;',
@@ -341,7 +341,7 @@
     var items = [], currentBg = 'background.jpg', currentModel = '';
     var scanSeq = 0, newCount = 0, directoryOk = false, manualCount = 0;
     var thumbAvail = {}, manualItems = [], knownFiles = null;
-    // 磁盘缩略图：background/.thumbs/<原名去扩展名>.jpg（1280×720）
+    // 磁盘缩略图：static/background/.thumbs/<原名去扩展名>.jpg（1280×720）
     // 页面生成一次 → 经本地服务落盘 → 之后所有卡片和预览都读这张小图
     var thumbState = {}, thumbQueue = [], thumbBusy = false, thumbReady = {};
     var thumbServer = null;          // null 未知 / true 可写盘 / false 只能读现有文件
@@ -362,7 +362,7 @@
            chocola-casual → 巧克力 / casual
            shi_45         → 柳木詩夢 / shi 45（纯编号，保留前缀便于区分）
            柳木詩夢_私服   → 柳木詩夢 / 私服（文件名自带角色名时只留后半段）
-       想给某个造型换个显示名，就在 actions_config/<角色>/<模型>.json 里写
+       想给某个造型换个显示名，就在 character/actions_config/<角色>/<模型>.json 里写
        "name": "…"（见 modelNames）；没写的走这里的文件名默认值。 */
     function describeModel(file, folder) {
         var stem = stripModelExt(file);
@@ -392,7 +392,7 @@
         return { file: file, name: role, sub: sub };
     }
 
-    /* 唯一数据源：../data/ 的 HTTP 目录索引。目录里一层角色文件夹，
+    /* 唯一数据源：../character/data/ 的 HTTP 目录索引。目录里一层角色文件夹，
        每个文件夹内是模型——任何 *.zip 或未压缩的裸 PSB 都认。
        不同静态服务器给目录链接加不加
        尾斜杠不一致，所以除 zip 外的条目都当作「候选文件夹」探测一次，
@@ -427,7 +427,7 @@
         return links;
     }
 
-    /* 造型显示名的唯一可配来源：actions_config/<角色>/<词干>.json 的 name 字段。
+    /* 造型显示名的唯一可配来源：character/actions_config/<角色>/<词干>.json 的 name 字段。
        与模型扫描一样只认目录索引里真实存在的条目——根目录 → 列出的角色子目录
        → 子目录里列出的 .json，不存在的文件/目录一次都不请求，不会产生 404。
        索引不可用返回 null（保留上一轮别名），没写 name 或写得不合法就跳过。 */
@@ -473,7 +473,7 @@
         }).catch(function () { return null; });
     }
 
-    /* 角色 tab 顺序：actions_config/order.json 的 roles（文件夹名数组）。
+    /* 角色 tab 顺序：character/actions_config/order.json 的 roles（文件夹名数组）。
        与 name 同一套 404 规避——先查根目录索引，文件不存在就一次都不请求；
        读不到返回 null，调用方保留上一轮，不误清空。 */
     function fetchModelOrder() {
@@ -487,7 +487,7 @@
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .catch(function () {
                     // 手改坏了（缺逗号、尾逗号）在这里几乎无声，给一条可查的线索
-                    console.warn('[Sort] actions_config/order.json 不是合法 JSON，本轮退回自动顺序');
+                    console.warn('[Sort] character/actions_config/order.json 不是合法 JSON，本轮退回自动顺序');
                     return null;
                 })
                 .then(function (cfg) {
@@ -499,7 +499,7 @@
         }).catch(function () { return null; });
     }
 
-    /* 顺序只以 actions_config/order.json 为准：调完自动写回文件，刷新后按文件重建。
+    /* 顺序只以 character/actions_config/order.json 为准：调完自动写回文件，刷新后按文件重建。
        不在浏览器里留任何副本，因此不存在两份顺序打架。 */
 
     function nameKey(file, folder) {
@@ -528,7 +528,7 @@
     }
 
     function fetchModelTree() {
-        return fetchIndex('../data/').then(function (rootText) {
+        return fetchIndex('../character/data/').then(function (rootText) {
             if (rootText == null) return null;
             var links = parseIndex(rootText);
             var rootFiles = links.filter(function (l) {
@@ -536,7 +536,7 @@
             }).map(function (l) { return l.name; });
             var candidates = links.filter(function (l) { return !isModelFile(l.name); });
             return Promise.all(candidates.map(function (c) {
-                var url = '../data/' + encodeURIComponent(c.name) + '/';
+                var url = '../character/data/' + encodeURIComponent(c.name) + '/';
                 return fetchIndex(url)
                     .then(function (t) { return t == null ? fetchIndex(url) : t; }) // 一次重试，抗瞬时漏读
                     .then(function (t) {
@@ -582,7 +582,7 @@
                  sub: modelNames[nameKey(file, folder)] || d.sub, isNew: false };
     }
 
-    /* 组装角色组：tree.dirs 是「一个角色一个文件夹」。直接丢在 data/
+    /* 组装角色组：tree.dirs 是「一个角色一个文件夹」。直接丢在 character/data/
        根目录的 zip 仍按文件名前缀的角色名并入同名组（路径保持纯文件名，
        兼容旧链接）；找不到同名文件夹的根目录文件归到「其他」。 */
     function buildGroups(tree) {
@@ -892,7 +892,7 @@
        调序立刻重排 tab，并在 300ms 防抖后自动写回 order.json，没有保存按钮。
        只有 main.mjs 起的服务带写盘接口（响应头里有 X-Emote-Server）；
        没有服务时顺序只留在本次会话，提示会直说，不假装保存成功。 */
-    var ORDER_REL = 'steins-gate-lab-stage/actions_config/order.json';
+    var ORDER_REL = 'character/actions_config/order.json';
     var ORDER_API = '../api/order';
     var orderServer = null;          // null = 还没遇到 node 服务；true = 有写盘接口
     var orderSaving = false;
@@ -939,7 +939,7 @@
         sortTipPathEl = el('div', 'sg-sp-tip-path');
         sortTipPathEl.title = '每次调序后自动写入这个文件，不需要点保存';
         /* 拆两行写，别让 268px 的窄面板把文件名断在中间 */
-        sortTipPathEl.appendChild(document.createTextNode('自动保存到 steins-gate-lab-stage/'));
+        sortTipPathEl.appendChild(document.createTextNode('自动保存到 character/'));
         sortTipPathEl.appendChild(el('br'));
         var pathFile = el('b'); pathFile.textContent = 'actions_config/order.json';
         sortTipPathEl.appendChild(pathFile);
@@ -1095,7 +1095,7 @@
     }
 
     /* ---- 自动写盘：只有本地服务能写，浏览器里不留副本 ----
-       拖完 / ▲▼ 之后 300ms 防抖，一次 PUT 落到 actions_config/order.json。
+       拖完 / ▲▼ 之后 300ms 防抖，一次 PUT 落到 character/actions_config/order.json。
        没连上服务时不动文件，只在提示里说明——绝不假装保存成功。 */
     var sortTipTimer = 0;
     var orderSeq = 0;                // 每次调序 +1，用来识别「写盘期间又动了」
@@ -1315,12 +1315,12 @@
                                           : '正在载入角色…');
         }
         var url = new URL(location.href);
-        url.searchParams.set('model', path);   // 带角色文件夹：data/<角色>/<文件>.zip
+        url.searchParams.set('model', path);   // 带角色文件夹：character/data/<角色>/<文件>.zip
         // 留一帧给浏览器把遮罩画出来，再触发导航
         setTimeout(function () { location.href = url.toString(); }, 80);
     }
 
-    function bgUrl(file) { return 'background/' + encodeURIComponent(file); }
+    function bgUrl(file) { return '../static/background/' + encodeURIComponent(file); }
 
     function stemOf(file) { return file.replace(/\.[^.]+$/, ''); }
 
@@ -1428,7 +1428,7 @@
     /* ---- 磁盘缩略图：生成一次 → 落盘 → 之后只读小图 ----
        main.mjs 提供 GET /api/thumbs（已有清单）与 PUT /api/thumb?name=原图名。
        没有写盘接口（非 main.mjs 起的静态服务）时只读已有文件，不生成。 */
-    var THUMB_DIR = 'background/.thumbs/';
+    var THUMB_DIR = '../static/background/.thumbs/';
     var THUMB_PUT = '../api/thumb';
     var THUMB_W = 1280, THUMB_H = 720, THUMB_Q = 0.9;
 
@@ -1608,7 +1608,7 @@
 
     /* 唯一数据源：HTTP 目录索引。返回 null 表示服务器不支持列目录。 */
     function fetchDirectory() {
-        return fetch('background/?t=' + Date.now(), { cache: 'no-store' })
+        return fetch('../static/background/?t=' + Date.now(), { cache: 'no-store' })
             .then(function (r) { return r.ok ? r.text() : null; })
             .then(function (text) {
                 if (text == null) return null;
@@ -1692,13 +1692,13 @@
         if (!foot) return;
         var s = '共 ' + items.length + ' 张 · 悬停查看预览 · 点击即应用 · 选择自动记忆';
         if (!directoryOk) {
-            s += ' ｜ 当前服务未返回目录索引，点「导入文件夹」手动选择 background/';
+            s += ' ｜ 当前服务未返回目录索引，点「导入文件夹」手动选择 static/background/';
         } else if (thumbServer === false) {
-            s += ' ｜ 缩略图只读 background/.thumbs/（用 run.bat 打开可自动生成）';
+            s += ' ｜ 缩略图只读 static/background/.thumbs/（用 run.bat 打开可自动生成）';
         } else if (newCount) {
-            s += ' ｜ ' + newCount + ' 张新图，缩略图会自动补到 background/.thumbs/';
+            s += ' ｜ ' + newCount + ' 张新图，缩略图会自动补到 static/background/.thumbs/';
         } else {
-            s += ' ｜ 背景图片放进 background/ 后点「↻ 重新扫描」即可';
+            s += ' ｜ 背景图片放进 static/background/ 后点「↻ 重新扫描」即可';
         }
         if (manualCount) s += ' ｜ ' + manualCount + ' 张为本次会话导入（刷新后需重新选择）';
         foot.textContent = s;
@@ -1709,8 +1709,8 @@
         if (!items.length) {
             var empty = el('div', '', 'sg-group-title');
             empty.textContent = directoryOk
-                ? 'background/ 里还没有图片'
-                : '未读到目录索引：请用本地 HTTP 服务打开本页，或点「导入文件夹」选择 background/';
+                ? 'static/background/ 里还没有图片'
+                : '未读到目录索引：请用本地 HTTP 服务打开本页，或点「导入文件夹」选择 static/background/';
             grid.appendChild(empty);
             return;
         }
@@ -1874,13 +1874,13 @@
         var rescan = el('button', 'sg-bg-rescan');
         rescan.type = 'button';
         rescan.textContent = '↻ 重新扫描';
-        rescan.title = '重新读取 background/ 目录，刚丢进去的新图立刻出现';
+        rescan.title = '重新读取 static/background/ 目录，刚丢进去的新图立刻出现';
         rescan.addEventListener('click', function (e) { e.stopPropagation(); loadBackgrounds(); });
         // 服务器不返回目录索引时的纯前端兜底：让用户选一次文件夹
         var importBtn = el('button', 'sg-bg-import');
         importBtn.type = 'button';
         importBtn.textContent = '导入文件夹';
-        importBtn.title = '手动选择 background/ 文件夹（仅本次会话有效，刷新后需重新选择）';
+        importBtn.title = '手动选择 static/background/ 文件夹（仅本次会话有效，刷新后需重新选择）';
         importBtn.style.display = 'none';
         var picker = el('input', 'sg-bg-picker');
         picker.type = 'file';
@@ -1956,7 +1956,7 @@
         showPreview({ file: currentBg, label: curMeta.label, groupLabel: curMeta.groupLabel });
         setPinned(true);   // 默认固定展开，不依赖鼠标位置
 
-        // 异步把内置列表换成 ../data/ 的真实目录；成功与否都不影响控制条可用。
+        // 异步把内置列表换成 ../character/data/ 的真实目录；成功与否都不影响控制条可用。
         // 这个 promise 也交给 main.js：首次访问本地还没有索引时，靠它决定默认模型。
         readyScan = refreshModels();
 
@@ -1974,7 +1974,7 @@
             if (window.SG_LOADING) window.SG_LOADING.hide();
         });
 
-        // 从文件管理器切回页面时静默重扫：页面开着往 data/ 丢模型也会自己出现
+        // 从文件管理器切回页面时静默重扫：页面开着往 character/data/ 丢模型也会自己出现
         var rescanTimer = 0;
         function scheduleRescan() {
             if (window.SG_LOADING && typeof SG_LOADING.isVisible === 'function'

@@ -11,7 +11,7 @@
 //    1) 浏览器 <script>      : window.validateActionsConfig
 //    2) Node require/import  : require('./config_validator.js')
 //    3) CLI 自测             : node config_validator.js
-//                             （直接校验 ../actions_config/ 下的 JSON，含 extends 合并）
+//                             （直接校验 ../character/actions_config/ 下的 JSON，含 extends 合并）
 // ============================================================
 
 /** 扁平化 reactions → 动作数组 */
@@ -125,12 +125,12 @@ function validateActionsConfig(config) {
 }
 
 // ============================================================
-//  CLI 自测入口：直接校验 actions_config/ 下的 JSON
+//  CLI 自测入口：直接校验 character/actions_config/ 下的 JSON
 // ============================================================
 function _runCliSelfTest() {
     const fs = require('fs');
     const path = require('path');
-    const root = path.join(__dirname, '..', 'actions_config');
+    const root = path.join(__dirname, '..', 'character', 'actions_config');
     const { mergeSparse } = require('./action_config.js');
 
     const readJson = (p) => {
@@ -140,7 +140,7 @@ function _runCliSelfTest() {
 
     const common = readJson(path.join(root, 'common.json'));
     if (!common) {
-        console.error('❌ 缺少 actions_config/common.json');
+        console.error('❌ 缺少 character/actions_config/common.json');
         process.exitCode = 1;
         return;
     }

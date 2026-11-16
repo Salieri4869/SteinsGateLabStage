@@ -8,20 +8,24 @@
      ./run.sh 8000                     # macOS / Linux / Git Bash 启动脚本
      run.bat 8000                      # Windows 启动脚本
 
-   在静态托管之外多四个接口，响应头都带 X-Emote-Server: node，
+   在静态托管之外多几个 /api 接口，响应头都带 X-Emote-Server: node，
    前端据此判断有没有写盘能力：
-     GET  /api/order              读 actions_config/order.json
+     GET  /api/order              读 character/actions_config/order.json
      PUT  /api/order              写回角色顺序 {"roles": [...]}
-     GET  /api/thumbs             background/.thumbs/ 里已有的缩略图
+     GET  /api/thumbs             static/background/.thumbs/ 里已有的缩略图
      PUT  /api/thumb?name=原图名  收 1280×720 JPEG，落成 .thumbs/<原名>.jpg
      GET  /api/story              story/scenes/ 下的场景清单
      GET/PUT /api/story?name=…     读/写剧本与 cast.json（点保存时调用）
+     GET  /api/voice               列出 story/voices/ 下的音频
+     GET  /api/voice?name=…        流式播放音频（支持 Range）
+     POST /api/voice               导入音频（octet-stream）或文字 → TTS（json，需 EMOTE_TTS_BIN，未配返回 501）
    探测不到（python / file:// / 别人的机器）时前端只改内存、只读已有缩略图，
    提示会直说没连上服务，不假装保存成功。
 
    写盘边界：
-     · 只写 order.json 与 .thumbs/<原名>.jpg 两类路径，全部重新拼，不接受目录成分；
+     · 只写 order.json、.thumbs/<原名>.jpg、story/voices/<白名单名> 三类路径，全部重新拼，不接受目录成分；
      · order.json 只收 {"roles": [...]} 并逐项校验；缩略图只收 JPEG（FFD8FF）且原图必须存在；
+       音频只收白名单扩展名、上限 12MB；
      · 先写 .tmp 再 rename，写坏了也不会留下半份文件；
      · 默认只监听 127.0.0.1，局域网访问不到，也就没有外部写入面。 */
 
@@ -43,15 +47,15 @@ function argOf(name, dflt) {
 const PORT = Number(argOf('--port', process.env.PORT || 8899));
 const HOST = argOf('--host', '127.0.0.1');
 const ROOT = resolve(argOf('--root', HERE));
-const ORDER_FILE = join(ROOT, 'actions_config', 'order.json');
-const ORDER_REL = 'actions_config/order.json';
+const ORDER_FILE = join(ROOT, 'character', 'actions_config', 'order.json');
+const ORDER_REL = 'character/actions_config/order.json';
 const MAX_BODY = 256 * 1024;         // 200 个角色名远用不到这么多，超了按异常请求处理
 
-/* 背景缩略图落盘目录：background/.thumbs/<原名去扩展名>.jpg（1280×720）
+/* 背景缩略图落盘目录：static/background/.thumbs/<原名去扩展名>.jpg（1280×720）
    页面用 canvas 生成一次，之后所有预览都读这张小图，不再反复解码 3072×1728 原图。 */
-const BG_DIR = join(ROOT, 'steins_gate', 'background');
+const BG_DIR = join(ROOT, 'static', 'background');
 const THUMB_DIR = join(BG_DIR, '.thumbs');
-const THUMB_REL = 'steins_gate/background/.thumbs';
+const THUMB_REL = 'static/background/.thumbs';
 const THUMB_MAX = 2 * 1024 * 1024;   // 实测 720p JPEG 约 120~220KB，2MB 兜底
 const IMG_EXT = /\.(jpe?g|png|webp|bmp|gif|avif)$/i;
 
@@ -60,6 +64,16 @@ const STORY_DIR = join(ROOT, 'story');
 const SCENE_DIR = join(STORY_DIR, 'scenes');
 const CAST_FILE = join(STORY_DIR, 'cast.json');
 const SCENE_NAME = /^[a-z0-9][a-z0-9-]*\.json$/;
+
+/* 即时语音：导入 / TTS 合成的音频都落 story/voices/；TTS 走可选外部引擎（默认关闭）
+   /api/voice             GET 列出 / GET?name= 流式播放（Range，供 <audio> 拖动）
+   /api/voice POST        octet-stream 导入音频；application/json {text} 文字 → TTS
+                          未配置引擎时 TTS 返回 501，前端据此降级 */
+const VOICE_DIR = join(STORY_DIR, 'voices');
+const VOICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\.(opus|ogg|wav|mp3|m4a|flac|webm)$/i;
+const VOICE_MAX = 12 * 1024 * 1024;   // 单段语音上限 12MB
+const TTS_BIN = process.env.EMOTE_TTS_BIN || '';   // 例：edge-tts；留空即未配置
+const TTS_VOICE = process.env.EMOTE_TTS_VOICE || 'zh-CN-XiaoxiaoNeural';
 
 /* ---------- MIME ---------- */
 const MIME = {
@@ -89,6 +103,8 @@ const MIME = {
     '.mp3': 'audio/mpeg',
     '.ogg': 'audio/ogg',
     '.oga': 'audio/ogg',
+    '.opus': 'audio/ogg',
+    '.flac': 'audio/flac',
     '.m4a': 'audio/mp4',
     '.mp4': 'video/mp4',
     '.webm': 'video/webm',
@@ -209,7 +225,7 @@ function readBody(req) {
     });
 }
 
-/* ---------- 背景缩略图（background/.thumbs） ---------- */
+/* ---------- 背景缩略图（static/background/.thumbs） ---------- */
 function readRawBody(req, limit) {
     return new Promise((resolvePromise, reject) => {
         let size = 0;
@@ -235,7 +251,7 @@ async function listThumbs() {
     }
 }
 
-/* 只接受「background/ 里真实存在的那张原图」的 720p JPEG，写到 .thumbs/<原名去扩展名>.jpg。
+/* 只接受「static/background/ 里真实存在的那张原图」的 720p JPEG，写到 .thumbs/<原名去扩展名>.jpg。
    路径全部重新拼，不接受任何目录成分；先写 .tmp 再 rename，不会留半张图。 */
 async function writeThumb(name, buf) {
     const base = String(name || '');
@@ -246,7 +262,7 @@ async function writeThumb(name, buf) {
 
     let info;
     try { info = await stat(join(BG_DIR, base)); }
-    catch (_) { throw new Error('background/ 里没有这个文件：' + base); }
+    catch (_) { throw new Error('static/background/ 里没有这个文件：' + base); }
     if (!info.isFile()) throw new Error('不是文件：' + base);
 
     // JPEG 头 FFD8FF：接口只收 JPEG，避免被当成任意文件写入口
@@ -344,6 +360,107 @@ async function writeStory(target, data) {
     return text;
 }
 
+/* ---------- 即时语音 ---------- */
+function voiceTarget(name) {
+    if (!name || name.length > 120 || !VOICE_NAME.test(name) || name.includes('..')) {
+        throw new Error('非法音频名（只允许字母数字与 . _ -，且带音频扩展名）');
+    }
+    return { abs: join(VOICE_DIR, name), name };
+}
+
+async function listVoices() {
+    try {
+        const names = await readdir(VOICE_DIR);
+        return names.filter((n) => VOICE_NAME.test(n)).sort();
+    } catch (err) {
+        if (err.code === 'ENOENT') return [];
+        throw err;
+    }
+}
+
+/* 先写 .tmp 再 rename；名字全部重拼，不接受目录成分 */
+async function writeVoice(name, buf) {
+    const t = voiceTarget(name);
+    await mkdir(VOICE_DIR, { recursive: true });
+    const tmp = t.abs + '.tmp';
+    await writeFile(tmp, buf);
+    try { await rename(tmp, t.abs); }
+    catch (err) { await unlink(tmp).catch(() => {}); throw err; }
+    return t;
+}
+
+/* TTS 预留：配了 EMOTE_TTS_BIN 就调外部命令，把文字写成音频文件返回。
+   没配则抛「未配置」，路由回 501，前端据此提示降级。 */
+async function synthVoice(text, outName) {
+    if (!TTS_BIN) throw Object.assign(new Error('未配置 TTS 引擎（EMOTE_TTS_BIN）'), { code: 'NO_TTS' });
+    const text2 = String(text || '').trim();
+    if (!text2) throw new Error('缺少 text');
+    if (text2.length > 500) throw new Error('文字过长（上限 500 字）');
+    const t = voiceTarget(outName);
+    await mkdir(VOICE_DIR, { recursive: true });
+    const tmp = t.abs + '.tmp';
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const run = promisify(execFile);
+    try {
+        // 约定：外部命令支持 --voice <名> --text <文字> --write-media <文件>
+        await run(TTS_BIN, ['--voice', TTS_VOICE, '--text', text2, '--write-media', tmp],
+            { timeout: 60000, maxBuffer: 1024 * 1024 });
+        await stat(tmp);
+        await rename(tmp, t.abs);
+    } catch (err) {
+        await unlink(tmp).catch(() => {});
+        if (err && err.code === 'NO_TTS') throw err;
+        throw new Error('TTS 合成失败：' + (err && err.message));
+    }
+    return t;
+}
+
+/* Range：只处理单段 bytes=a-b，返回 {start,end,total} 或 null（从头） */
+function parseRange(header, size) {
+    if (!header) return null;
+    const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+    if (!m || (!m[1] && !m[2])) return null;
+    let start, end;
+    if (m[1]) {
+        start = Number(m[1]);
+        end = m[2] ? Number(m[2]) : size - 1;
+    } else {
+        // bytes=-N：末尾 N 字节
+        const n = Number(m[2]);
+        start = Math.max(0, size - n);
+        end = size - 1;
+    }
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= size) return null;
+    return { start, end: Math.min(end, size - 1), total: size };
+}
+
+/* 流式发音频：支持 Range（206）与 HEAD，带 X-Emote-Server 头 */
+async function streamVoice(req, res, abs, info) {
+    const type = MIME[extname(abs).toLowerCase()] || 'application/octet-stream';
+    const range = parseRange(req.headers.range, info.size);
+    const base = {
+        'Content-Type': type,
+        'Accept-Ranges': 'bytes',
+        'X-Emote-Server': 'node',
+        'Cache-Control': 'no-store'
+    };
+    if (range) {
+        const len = range.end - range.start + 1;
+        res.writeHead(206, { ...base,
+            'Content-Length': len,
+            'Content-Range': `bytes ${range.start}-${range.end}/${range.total}`
+        });
+        if (req.method === 'HEAD') return res.end();
+        return createReadStream(abs, { start: range.start, end: range.end })
+            .on('error', () => { try { res.destroy(); } catch (_) {} }).pipe(res);
+    }
+    res.writeHead(200, { ...base, 'Content-Length': info.size });
+    if (req.method === 'HEAD') return res.end();
+    return createReadStream(abs)
+        .on('error', () => { try { res.destroy(); } catch (_) {} }).pipe(res);
+}
+
 /* ---------- 路由 ---------- */
 async function handleApi(req, res, pathname) {
     if (pathname === '/api/thumbs') {
@@ -412,6 +529,81 @@ async function handleApi(req, res, pathname) {
         } catch (err) {
             console.error('[story] 写盘失败:', err.message);
             return sendJson(res, 500, { ok: false, error: '写盘失败：' + err.message });
+        }
+    }
+
+    /* /api/voice —— 列出 / 导入 / 流式播放 / 文字合成（TTS）
+       GET  无 name 列目录，带 name 流式播放（Range / 206）
+       POST Content-Type: application/json → 文字合成；否则按原始音频字节导入 */
+    if (pathname === '/api/voice') {
+        const url = new URL(req.url, 'http://127.0.0.1');
+        const name = (url.searchParams.get('name') || '').trim();
+
+        if (req.method === 'GET' || req.method === 'HEAD') {
+            if (!name) {
+                try { return sendJson(res, 200, { ok: true, files: await listVoices() }); }
+                catch (err) { return sendJson(res, 500, { ok: false, error: err.message }); }
+            }
+            let t;
+            try { t = voiceTarget(name); }
+            catch (err) { return sendJson(res, 400, { ok: false, error: err.message }); }
+            let info;
+            try { info = await stat(t.abs); }
+            catch (err) {
+                if (err.code === 'ENOENT') return sendJson(res, 404, { ok: false, error: '音频不存在' });
+                return sendJson(res, 500, { ok: false, error: err.message });
+            }
+            if (!info.isFile()) return sendJson(res, 404, { ok: false, error: '不是文件' });
+            return streamVoice(req, res, t.abs, info);
+        }
+
+        if (req.method !== 'POST' && req.method !== 'PUT') {
+            res.setHeader('Allow', 'GET, HEAD, POST, PUT');
+            return sendJson(res, 405, { ok: false, error: '只支持 GET / POST' });
+        }
+
+        // 文字合成：JSON 体 {text, name?}，调可选 TTS 引擎
+        const ctype = String(req.headers['content-type'] || '').toLowerCase();
+        if (ctype.includes('application/json')) {
+            let payload;
+            try { payload = JSON.parse(await readBody(req)); }
+            catch (err) { return sendJson(res, 400, { ok: false, error: '请求体不是合法 JSON：' + err.message }); }
+            const text = String((payload && payload.text) || '').trim();
+            if (!text) return sendJson(res, 400, { ok: false, error: '缺少 text' });
+            const outName = String((payload && payload.name) || '').trim()
+                || 'tts-' + Date.now() + '.mp3';
+            try {
+                const t = await synthVoice(text, outName);
+                const when = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                console.log(`[voice] ${when} TTS ${t.name} ← ${text.slice(0, 20)}…`);
+                return sendJson(res, 200, { ok: true,
+                    name: t.name, url: '/api/voice?name=' + encodeURIComponent(t.name), text });
+            } catch (err) {
+                if (err.code === 'NO_TTS') {
+                    return sendJson(res, 501, { ok: false, code: 'NO_TTS',
+                        error: 'TTS 未配置：请用 /api/voice 导入音频，或设置 EMOTE_TTS_BIN 启用语音合成' });
+                }
+                return sendJson(res, 500, { ok: false, error: err.message });
+            }
+        }
+
+        // 原始音频导入：名字参数优先，否则用请求头，再否则按时间生成
+        let outName = (url.searchParams.get('name') || req.headers['x-voice-name'] || '').trim();
+        let buf;
+        try { buf = await readRawBody(req, VOICE_MAX); }
+        catch (err) { return sendJson(res, 400, { ok: false, error: err.message }); }
+        if (!buf.length) return sendJson(res, 400, { ok: false, error: '音频数据为空' });
+        if (!outName) {
+            const ext = (url.searchParams.get('ext') || 'opus').replace(/[^a-z0-9]/gi, '') || 'opus';
+            outName = 'live-' + Date.now() + '.' + ext;
+        }
+        try {
+            const t = await writeVoice(outName, buf);
+            const when = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+            console.log(`[voice] ${when} 导入 ${t.name} ← ${Math.round(buf.length / 1024)}KB`);
+            return sendJson(res, 200, { ok: true, name: t.name, url: '/api/voice?name=' + encodeURIComponent(t.name), bytes: buf.length });
+        } catch (err) {
+            return sendJson(res, 400, { ok: false, error: err.message });
         }
     }
 
