@@ -26,7 +26,7 @@ The homepage `index.html` has three in-page tabs ("Works / Characters / Tech") p
 - **Touch reactions** — hit areas derived from `charaProfile` labels (eye / mouth / bust / top …), each resolving to a random action from a pool, optionally with audio and variable interpolation.
 - **Lip sync** — offline WebAudio envelope analysis driving `face_talk` via rAF lookup. No fallback playback path; audio failures are reported and skipped.
 - **Scene UI** — character tabs with a model panel, a background preview panel, and tab reordering. Order is written back to `character/actions_config/order.json`; backgrounds and cards read the 720p thumbnails in `static/background/.thumbs/`.
-- **Story Mode** — `/story` is a single page with two modes: a visual scene editor (drag / ▲▼ / add-remove lines) and a typewriter player (click / auto advance / voice / action macros). Character bindings live in `domain/story/cast.json`, scenes in `domain/story/scenes/*.json`. The player's "Live line" panel lets you type text + pick audio (a local file or one from the `character/sounds/` audio list) or synthesize it, and make the current model speak without a script.
+- **Story Mode** — `/story` is a single page with two modes: a visual scene editor (drag / ▲▼ / add-remove lines) and a typewriter player (click / auto advance / voice / action macros). Character bindings live in `steins_gate/story/cast.json`, scenes in `steins_gate/story/scenes/*.json`. The player's "Live line" panel lets you type text + pick audio (a local file or one from the `character/sounds/` audio list) or synthesize it, and make the current model speak without a script.
 - **Dev panel** — built-in inspector for selectors, poses and variables (`installDevPanel`).
 
 ## Quick start
@@ -59,13 +59,13 @@ Once running, the homepage offers three in-page anchors (Works / Characters / Te
 |---|---|
 | `GET/PUT /api/order` | Read/write character order in `character/actions_config/order.json` |
 | `GET /api/thumbs`, `PUT /api/thumb` | Background thumbnails in `static/background/.thumbs/` |
-| `GET/PUT /api/story` | Read/write `domain/story/cast.json` and `domain/story/scenes/*.json` |
-| `GET /api/voice` | List live-line audio (`domain/story/voices/`) |
+| `GET/PUT /api/story` | Read/write `steins_gate/story/cast.json` and `steins_gate/story/scenes/*.json` |
+| `GET /api/voice` | List live-line audio (`steins_gate/story/voices/`) |
 | `GET /api/voice?name=…` | Stream audio with Range support (seekable) |
 | `POST /api/voice` (octet-stream) | Import audio to disk, 12MB max (the page's "Pick audio" / "Audio list" never use this — no disk writes) |
 | `POST /api/voice` (json) | Text → speech synthesis (TTS hook, `{"text":"…"}`) |
 
-**Live-line audio source**: three tabs. "Pick audio" plays a local file in-browser via a temporary blob URL — never uploaded or written to disk. "Audio list" lists folders and audio files under `character/sounds/` and plays the chosen one from a static path — also never written to disk. "Text synthesis" is a TTS hook: set env vars `EMOTE_TTS_BIN` (e.g. `edge-tts`) and optionally `EMOTE_TTS_VOICE` (default `zh-CN-XiaoxiaoNeural`) to enable it; without config the endpoint returns 501 and the UI tells you to pick audio instead. Only synthesized audio is saved to `domain/story/voices/`. The external command must accept `--voice <name> --text <text> --write-media <file>`.
+**Live-line audio source**: three tabs. "Pick audio" plays a local file in-browser via a temporary blob URL — never uploaded or written to disk. "Audio list" lists folders and audio files under `character/sounds/` and plays the chosen one from a static path — also never written to disk. "Text synthesis" is a TTS hook: set env vars `EMOTE_TTS_BIN` (e.g. `edge-tts`) and optionally `EMOTE_TTS_VOICE` (default `zh-CN-XiaoxiaoNeural`) to enable it; without config the endpoint returns 501 and the UI tells you to pick audio instead. Only synthesized audio is saved to `steins_gate/story/voices/`. The external command must accept `--voice <name> --text <text> --write-media <file>`.
 
 Any other static server works too — write capabilities just degrade to read-only: ordering lasts for the session, thumbnails are only read from disk, scenes cannot be saved, and text synthesis (TTS) is unavailable; "Pick audio" and "Audio list" need no server-side writes and still work.
 
@@ -91,8 +91,8 @@ common/                     Runtime shared by the player and story pages
   lipsync.js                Lip sync (offline WebAudio analysis, rAF lookup)
   emote_config.js           Base model / action config
   config_validator.js       Config shape validation (with CLI self-test)
-domain/                     Page entries
-  steins_gate/              LAB player
+steins_gate/                     Page container
+  stage/                    LAB player
     index.html              Player entry
     main.js                 Bootstrap, interaction, arm switcher, dev panel
     scene_ui.js             Control bar, model / sort / background panels

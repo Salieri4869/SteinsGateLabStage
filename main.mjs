@@ -14,16 +14,16 @@
      PUT  /api/order              写回角色顺序 {"roles": [...]}
      GET  /api/thumbs             static/background/.thumbs/ 里已有的缩略图
      PUT  /api/thumb?name=原图名  收 1280×720 JPEG，落成 .thumbs/<原名>.jpg
-     GET  /api/story              domain/story/scenes/ 下的场景清单
+     GET  /api/story              steins_gate/story/scenes/ 下的场景清单
      GET/PUT /api/story?name=…     读/写剧本与 cast.json（点保存时调用）
-     GET  /api/voice               列出 domain/story/voices/ 下的音频
+     GET  /api/voice               列出 steins_gate/story/voices/ 下的音频
      GET  /api/voice?name=…        流式播放音频（支持 Range）
      POST /api/voice               导入音频（octet-stream）或文字 → TTS（json，需 EMOTE_TTS_BIN，未配返回 501）
    探测不到（python / file:// / 别人的机器）时前端只改内存、只读已有缩略图，
    提示会直说没连上服务，不假装保存成功。
 
    写盘边界：
-     · 只写 order.json、.thumbs/<原名>.jpg、domain/story/voices/<白名单名> 三类路径，全部重新拼，不接受目录成分；
+     · 只写 order.json、.thumbs/<原名>.jpg、steins_gate/story/voices/<白名单名> 三类路径，全部重新拼，不接受目录成分；
      · order.json 只收 {"roles": [...]} 并逐项校验；缩略图只收 JPEG（FFD8FF）且原图必须存在；
        音频只收白名单扩展名、上限 12MB；
      · 先写 .tmp 再 rename，写坏了也不会留下半份文件；
@@ -59,13 +59,13 @@ const THUMB_REL = 'static/background/.thumbs';
 const THUMB_MAX = 2 * 1024 * 1024;   // 实测 720p JPEG 约 120~220KB，2MB 兜底
 const IMG_EXT = /\.(jpe?g|png|webp|bmp|gif|avif)$/i;
 
-/* 剧情数据：只写 domain/story/cast.json 与 domain/story/scenes/<slug>.json，文件名一律 ASCII slug */
-const STORY_DIR = join(ROOT, 'domain', 'story');
+/* 剧情数据：只写 steins_gate/story/cast.json 与 steins_gate/story/scenes/<slug>.json，文件名一律 ASCII slug */
+const STORY_DIR = join(ROOT, 'steins_gate', 'story');
 const SCENE_DIR = join(STORY_DIR, 'scenes');
 const CAST_FILE = join(STORY_DIR, 'cast.json');
 const SCENE_NAME = /^[a-z0-9][a-z0-9-]*\.json$/;
 
-/* 即时语音：导入 / TTS 合成的音频都落 domain/story/voices/；TTS 走可选外部引擎（默认关闭）
+/* 即时语音：导入 / TTS 合成的音频都落 steins_gate/story/voices/；TTS 走可选外部引擎（默认关闭）
    /api/voice             GET 列出 / GET?name= 流式播放（Range，供 <audio> 拖动）
    /api/voice POST        octet-stream 导入音频；application/json {text} 文字 → TTS
                           未配置引擎时 TTS 返回 501，前端据此降级 */
@@ -131,19 +131,24 @@ const sendJson = (res, code, obj) => send(res, code, JSON.stringify(obj) + '\n',
     { 'Content-Type': 'application/json; charset=utf-8' });
 
 /* 把 URL 路径映射到磁盘路径；任何越界一律 403，不做「尽力而为」
-   页面物理上收在 domain/ 下，但对外 URL 保持 /story/、/steins_gate/ 不变，
-   于是这里做一层前缀重写：URL 短路径 → domain/ 内的真实目录。目录索引仍用
-   原始 URL 生成链接，浏览器里的相对路径（../common/ 等）也照旧以短 URL 为基准。 */
+   页面物理上收在 steins_gate/ 容器下，但对外 URL 保持 /story/、/steins_gate/ 不变，
+   于是这里做一层前缀重写：URL 短路径 → 容器内的真实目录。目录索引仍用
+   原始 URL 生成链接，浏览器里的相对路径（../common/ 等）也照旧以短 URL 为基准。
+   命中一条规则就 break：重写结果 /steins_gate/... 仍以 /steins_gate 开头，
+   若继续往下匹配会被第二条规则二次改写，故不能让规则链式生效。 */
 const URL_ALIAS = [
-    ['/story', '/domain/story'],
-    ['/steins_gate', '/domain/steins_gate']
+    ['/story', '/steins_gate/story'],
+    ['/steins_gate', '/steins_gate/stage']
 ];
 function toDisk(urlPath) {
     let p;
     try { p = decodeURIComponent(urlPath.split('?')[0]); } catch (_) { return null; }
     if (p.includes('\0')) return null;
     for (const [from, to] of URL_ALIAS) {
-        if (p === from || p.startsWith(from + '/')) p = to + p.slice(from.length);
+        if (p === from || p.startsWith(from + '/')) {
+            p = to + p.slice(from.length);
+            break;
+        }
     }
     const abs = resolve(join(ROOT, p));
     if (abs !== ROOT && !abs.startsWith(ROOT + sep)) return null;
@@ -696,7 +701,7 @@ async function handleStatic(req, res, pathname) {
             res.writeHead(301, { Location: pathname + '/' + (urlSearchOf(req)), 'X-Emote-Server': 'node' });
             return res.end();
         }
-        /* 目录里有 index.html 就当首页（项目根 = 角色档案主页，domain/steins_gate/ = 场景页）；
+        /* 目录里有 index.html 就当首页（项目根 = 角色档案主页，steins_gate/stage/ = 场景页）；
            模型目录没有 index.html，照旧列目录给前端 parseIndex 用 */
         const idxAbs = join(abs, 'index.html');
         let idxInfo = null;
