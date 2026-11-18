@@ -1,0 +1,32 @@
+{
+  "doc": "阿万音鈴羽a 的专属演出。文件名与 character/data/阿万音鈴羽/阿万音鈴羽a.psb.m.pure.zip 去掉打包后缀后同名；未声明的字段继承 common.json。timeline / diffSlot 只用铃羽模型实际存在的标签；这里不写 variables，避免套用其他造型的变量名。",
+  "extends": "common.json",
+  "model": "阿万音鈴羽a.psb.m.pure.zip",
+  "reactions": {
+    "eye": {
+      "radius": 0.09,
+      "pool": [
+        { "timeline": "表情_驚き00", "diffSlot1": "びっくり", "duration": 1200 },
+        { "timeline": "表情_困る00", "diffSlot1": "悩み", "duration": 2800 }
+      ]
+    },
+    "mouth": {
+      "radius": 0.04,
+      "pool": [
+        { "timeline": "表情_笑", "diffSlot1": "にっこり", "duration": 2200 }
+      ]
+    },
+    "bust": {
+      "radius": 0.10,
+      "pool": [
+        { "timeline": "表情_照れる", "diffSlot1": "はじらい", "duration": 1500 }
+      ]
+    },
+    "top": {
+      "radius": 0.05,
+      "pool": [
+        { "timeline": "表情_頬染め01", "diffSlot1": "いやいや", "duration": 1200 }
+      ]
+    }
+  }
+}

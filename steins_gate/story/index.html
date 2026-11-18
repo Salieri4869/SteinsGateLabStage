@@ -5,12 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>剧情模式 · Amadeus Demo</title>
     <style>
+        /* 思源黑体 Medium（Source Han Sans SC Medium）。
+           优先用本机已装的同名字体（local 命中就不下载）；没有时回落到随包携带的
+           woff2 子集（GB2312 一级字 + 常用标点/假名 + 本工程用到的全部字符）。
+           子集由 fontTools 从 SourceHanSans-Medium.ttc 的 SC 分片生成，只保留 500 一档。 */
+        @font-face {
+            font-family: "SG Sans";
+            src: local("Source Han Sans SC Medium"),
+                 local("SourceHanSansSC-Medium"),
+                 local("Source Han Sans SC"),
+                 url(ui/fonts/SourceHanSansSC-Medium.subset.woff2) format("woff2");
+            font-weight: 500;
+            font-style: normal;
+            font-display: swap;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 100%; height: 100%; overflow: hidden; }
         body {
             background: #07141a center center / cover no-repeat;
             color: #e6f1ef;
-            font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+            font-family: "SG Sans", "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
+            font-weight: 500;
         }
         #canvas {
             display: block; position: fixed; inset: 0;
@@ -19,6 +34,8 @@
             z-index: 1; transition: opacity .25s ease;
         }
         html[data-mode="edit"] #canvas { opacity: .18; }
+        /* 多角色逐个加载期间：位置/缩放/显隐还没算好，先藏起来，避免放大与提前登场闪现 */
+        html.st-loading-actors #canvas { visibility: hidden; }
 
         #st-bar {
             position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 10;
@@ -42,25 +59,225 @@
         #st-progress { font: 500 11px/1 ui-monospace, Consolas, monospace; color: rgba(230,241,239,.55); }
         .st-spacer { flex: 1; }
         .st-modes { display: flex; gap: 4px; }
-        .st-modes button, #st-save, #st-add-line {
+        .st-modes button, #st-save, #st-add-line, #st-full {
             background: transparent; color: #9fb8b4; cursor: pointer;
             border: 1px solid rgba(99,214,196,.25); border-radius: 4px;
             padding: 5px 14px; font-size: 12px;
         }
+        #st-full { padding: 5px 12px; }
+        #st-full[disabled] { opacity: .4; cursor: default; }
+        /* 全屏：顶栏收起，只在右上角留一枚很淡的退出键（Esc 同样有效） */
+        html:fullscreen #st-bar { display: none; }
+        #st-full-exit {
+            display: none; position: fixed; top: 10px; right: 12px; z-index: 20;
+            padding: 4px 10px; cursor: pointer; opacity: .45;
+            font: 500 11px/1.5 ui-monospace, Consolas, monospace; letter-spacing: .1em;
+            color: #cfe4e0; background: rgba(4,12,17,.42);
+            border: 1px solid rgba(99,214,196,.22); border-radius: 3px;
+            transition: opacity .2s, color .2s, border-color .2s;
+        }
+        #st-full-exit:hover { opacity: 1; color: #e6f1ef; border-color: rgba(99,214,196,.65); }
+        html:fullscreen #st-full-exit { display: block; }
         #st-add-line { padding: 4px 10px; }
         .st-modes button.is-active { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
         #st-save[disabled] { opacity: .45; cursor: default; }
 
-        #st-textbox {
-            position: fixed; left: 6vw; right: 6vw; bottom: 5vh; z-index: 5;
-            min-height: 108px; padding: 16px 22px 14px;
-            background: rgba(4, 12, 17, .86); border: 1px solid rgba(99,214,196,.28);
-            border-radius: 8px; cursor: pointer;
+        /* ---- 对话 UI：从 main.psb.m 拆出的 MSGWIN / name 两块对象 ----
+           世界坐标固定 1920×1080（与游戏 UI 画布同尺），整层按视口等比缩放并居中，
+           内部一律写绝对像素，改位置就照游戏里的数值改。 */
+        /* 以宽度为基准铺满视口、底边贴底：窗口条永远贯穿整屏，不会因视口不是 16:9 而露边 */
+        #st-hud {
+            position: fixed; left: 50%; bottom: 0; width: 1920px; height: 1080px;
+            transform-origin: 50% 100%; transform: translate(-50%, 0) scale(1);
+            z-index: 5; pointer-events: none; user-select: none;
         }
-        html[data-mode="edit"] #st-textbox { display: none; }
-        #st-name { font-size: 12px; letter-spacing: .08em; color: #63d6c4; margin-bottom: 8px; }
-        #st-text { font-size: 16px; line-height: 1.7; min-height: 28px; }
-        #st-hint { text-align: right; font-size: 11px; color: rgba(230,241,239,.5); margin-top: 6px; }
+        html[data-mode="edit"] #st-hud { display: none; }
+        #st-hud .hud-ly { position: absolute; }
+        #st-hud .hud-ly img { display: block; width: 100%; height: 100%; }
+        #st-hud .hud-win   { left: 0;    top: 790px;  width: 1920px; height: 290px; }
+        /* 电路线整层是纯白线稿，压到 55% 当「扫过」的闪光用，不然刺眼 */
+        #st-hud .hud-lines { left: 0;    top: 790px;  width: 1920px; height: 290px; opacity: .55; }
+        #st-hud .hud-deco  { left: 434px; top: 1022px; width: 1053px; height: 56px; opacity: 0; }
+        #st-hud .hud-name  { top: 1014px; height: 59px; }
+        /* 白闪层：擦入时领先底板半个身位，收尾淡掉，位置由脚本同步 */
+        #st-hud .hud-name-w { top: 1014px; height: 59px; opacity: 0; }
+
+        /* 名牌两侧装饰线（原素材：tex#000 的 main/名前飾り 1053×56）分两个状态：
+             idle   deco_dim.webp —— 游戏原样的那层淡描边（黑填充 α≈36 / 白描边 α≈120），AUTO 关掉时的常态，完全静止
+             auto   deco_lit.webp —— 描边推到纯白、填充压成黑块（游戏里 名前飾りwhite 那一层），只在 AUTO 打开时出现
+           节奏按参考录像（2560×1440 / 60fps，一个周期正好 90 帧 = 1.500s）逐帧量出：
+             前沿贴着左边缘出现 → 29.7 帧（0.495s）扫到右边缘、整条点亮 → 停 1 帧 →
+             同一条前沿再从左边扫一次，27.9 帧（0.465s）把光从左往右收走 → 剩 31.6 帧（0.527s）全暗。
+           注意这条 1053×56 的图里其实有两个独立的件（原片分开量过，别用一套遮罩管全部）：
+             ① 上排主图案（0–43 行，横贯全宽）—— 上面那套单条硬边前沿，左→右再左→右；
+             ② 下排居中短线（43–56 行，x 294–758，左右镜像、对称相关 1.000）——
+                它是「从中间往两头张开、再收回」，见下面的 sg-chg-l / sg-chg-r。
+           性能要点：高亮层 = 「动画 mask 的 wrapper」+「静态底图」。mask 动画写在带 filter 的元素上
+           会让 filter 每帧重算（实测 12.1ms/帧）；亮/暗两态直接烘焙成两张图，连 filter 都省了。 */
+        .hud-deco .deco-base { display: block; width: 1053px; height: 56px; }
+        .hud-deco .deco-lit {
+            position: absolute; left: 0; top: 0; width: 1053px; height: 56px;
+            display: none; pointer-events: none;
+            /* 2122px 遮罩：0–1057px 不透明、1057–1061px 收尾、之后全透明。
+               前沿位置 = mask-position + 1057：
+                 -1061 → 前沿在元素左边缘之外（全暗）
+                 0     → 前沿越过右边缘（整条点亮，且不会把最右端 6px 裁掉）
+                 +1053 → 暗区推到右边缘（全暗）
+               一条连续动画同时表达「点亮」和「从左往右收走」；前沿是硬边（原片实测 250→105 只隔 4~8px）。 */
+            will-change: mask-position;
+            -webkit-mask-image: linear-gradient(90deg, #000 0 1057px, rgba(0,0,0,0) 1061px);
+            mask-image: linear-gradient(90deg, #000 0 1057px, rgba(0,0,0,0) 1061px);
+            -webkit-mask-size: 2122px 100%;  mask-size: 2122px 100%;
+            -webkit-mask-repeat: no-repeat;  mask-repeat: no-repeat;
+            -webkit-mask-position: -1061px 0; mask-position: -1061px 0;
+            animation: sg-sweep 1.5s linear infinite;
+        }
+        /* 没开 AUTO 时高亮层压根不参与布局和合成，只剩下面那张暗态图 */
+        .hud-deco.is-auto .deco-lit { display: block; }
+        .hud-deco .deco-lit i {
+            position: absolute; inset: 0; display: block;
+            background: url(ui/deco_lit.webp) no-repeat 0 0 / 1053px 56px;
+            /* 只让 0–43 行跟着左→右扫光；43 行以下那条居中短线归 .deco-chg 管，
+               否则它会被这条竖直前沿一起拖成从左往右（原片里它明明是从中间张开） */
+            clip-path: inset(0 0 13px 0);
+            /* 开关 AUTO 时别硬切：亮层淡进来 0.18s（display 由 none 变 block 时自动重跑） */
+            animation: sg-lit-in .18s ease both;
+        }
+        @keyframes sg-lit-in { from { opacity: 0; } to { opacity: 1; } }
+
+        /* 下排那条居中短线：左右各一片，从中心向两头推。
+           原片实测（周期 90 帧）：f121 起张开 → f138 满 → f141 起收回 → f158 全暗，
+           峰值正好落在上排全亮的同一帧，所以两头都用 31.5%/34.5% 的同一档。
+           参数：左右各 526.5px；43px 的上裁量把 43 行以下留给这条短线。 */
+        .hud-deco .deco-chg {
+            position: absolute; left: 0; top: 0; width: 1053px; height: 56px;
+            display: none; pointer-events: none;
+        }
+        .hud-deco.is-auto .deco-chg { display: block; }
+        .hud-deco .deco-chg span {
+            position: absolute; top: 0; width: 526.5px; height: 56px; display: block;
+            background: url(ui/deco_lit.webp) no-repeat 0 0;
+            clip-path: inset(43px 0 0 100%);
+            animation: sg-lit-in .18s ease both, sg-chg-l 1.5s linear infinite;
+        }
+        .hud-deco .deco-chg .chg-r {
+            left: 526.5px; background-position: -526.5px 0;
+            clip-path: inset(43px 100% 0 0);
+            animation: sg-lit-in .18s ease both, sg-chg-r 1.5s linear infinite;
+        }
+        /* 关键帧停在 55.9% 而不是 0：短线本身只占每片的后 44%
+           （左片 x 294–526.5、右片 526.5–758），再往外是空的。
+           若一路推到 0，前面 56% 的行程什么都不会发生，等于把张开时长压掉一半。
+           曲线按原片逐帧量出来的（换算成周期百分比）：
+             12.2%(183ms) 起张开 → 一帧内就冲到七成 → 慢爬到 30%(450ms) 满 →
+             停到 34.5%(517ms) → 慢收到 47%(705ms) 还剩两成 → 53.5%(802ms) 收干净。
+           所以不是一条 bezier，直接在中间插值点。 */
+        @keyframes sg-chg-l {
+            0%, 12.2%     { clip-path: inset(43px 0 0 100%); }
+            13.4%         { clip-path: inset(43px 0 0 68.2%); }
+            30%, 34.5%    { clip-path: inset(43px 0 0 55.9%); }
+            43.3%         { clip-path: inset(43px 0 0 70%); }
+            47%           { clip-path: inset(43px 0 0 90.3%); }
+            53.5%, 100%   { clip-path: inset(43px 0 0 100%); }
+        }
+        @keyframes sg-chg-r {
+            0%, 12.2%     { clip-path: inset(43px 100% 0 0); }
+            13.4%         { clip-path: inset(43px 68.2% 0 0); }
+            30%, 34.5%    { clip-path: inset(43px 55.9% 0 0); }
+            43.3%         { clip-path: inset(43px 70% 0 0); }
+            47%           { clip-path: inset(43px 90.3% 0 0); }
+            53.5%, 100%   { clip-path: inset(43px 100% 0 0); }
+        }
+        /* 原片实测：0.495s 点亮 → 停 1 帧（0.013s）→ 0.465s 收走 → 0.527s 全暗，整圈 1.500s。
+           百分比 = 该段时长 / 1.5s */
+        @keyframes sg-sweep {
+            0%            { -webkit-mask-position: -1061px 0; mask-position: -1061px 0; }
+            33%, 33.9%    { -webkit-mask-position: 0 0;       mask-position: 0 0; }
+            64.9%, 100%   { -webkit-mask-position: 1053px 0;  mask-position: 1053px 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .hud-deco .deco-lit,
+            .hud-deco .deco-chg { display: none !important; }
+        }
+
+        /* 文字盒等于整块底板宽并居中，垂直也跟着底板（59px 行高）走，
+           这样名字恒定落在底板几何中心；左右内边距由脚本按对称值算 */
+        #st-name {
+            position: absolute; height: 59px; line-height: 59px; text-align: center;
+            font-weight: 500; letter-spacing: .04em; font-size: 27px;
+            text-indent: .04em;   /* 抵消末字字距，让视觉重心真正居中 */
+            color: #101718; white-space: nowrap; overflow: hidden;
+        }
+        /* 这一句用的是别名 / 未知名（「？？？」）时压暗一点，一眼能看出来 */
+        #st-name.is-alias { color: #3f4b4e; }
+
+        #st-text {
+            position: absolute; left: 300px; top: 812px; width: 1300px;
+            font-size: 32px; line-height: 1.6; letter-spacing: .02em;
+            color: #eef4f3;
+            /* 游戏的台词是带黑描边的白字，这里用叠阴影近似，压在浅色背景上也读得清 */
+            text-shadow: 0 0 1px #000, 0 0 2px #000, 0 0 4px rgba(0,0,0,.92),
+                         0 2px 6px rgba(0,0,0,.8), 0 0 20px rgba(0,0,0,.45);
+            white-space: pre-wrap;
+        }
+
+        #st-hint {
+            position: absolute; left: 132px; top: 1022px; height: 30px; line-height: 30px;
+            font-size: 15px; color: rgba(212,232,229,.55); white-space: nowrap;
+        }
+        #st-hint:empty { display: none; }
+        /* 开场那 1 秒里窗还没铺好，AUTO 与提示先不露面 */
+        #st-hud #st-auto, #st-hud #st-hint { transition: opacity .3s ease, filter .15s ease; }
+        #st-hud:not(.is-open) #st-auto, #st-hud:not(.is-open) #st-hint { opacity: 0; }
+
+        /* 右下角闪烁的 ▼：台词打完才出现，仿游戏里的等待标记 */
+        #st-caret {
+            position: absolute; left: 1568px; top: 1024px; width: 0; height: 0;
+            border-left: 11px solid transparent; border-right: 11px solid transparent;
+            border-top: 13px solid #d6eae6;
+            animation: st-caret-blink 1.05s steps(1, end) infinite;
+            filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 6px rgba(120,214,196,.55));
+        }
+        #st-caret.is-off { display: none; }
+        @keyframes st-caret-blink { 0%, 55% { opacity: .85; } 56%, 100% { opacity: .1; } }
+
+        /* 对话框左下角的 AUTO：直接用 main.psb.m 里 pcbt_auto_* 的四态切片
+           （off 白字未开 / on 橙字已开 / no 灰暗不可用 / stop 灰字红斜杠）。
+           原生 92×32，与游戏同尺，不再用 CSS 描边画。 */
+        #st-auto {
+            position: absolute; left: 26px; top: 1022px; width: 92px; height: 32px;
+            padding: 0; border: 0; background: none; cursor: pointer; pointer-events: auto;
+            transition: filter .15s ease;
+        }
+        #st-auto img { display: block; width: 92px; height: 32px; -webkit-user-drag: none; }
+        #st-auto:hover { filter: brightness(1.2); }
+        #st-auto:active { filter: brightness(.92); }
+        #st-auto[disabled] { cursor: default; filter: grayscale(.4) brightness(.8); }
+
+        /* 对话框右侧的自动播放提示牌：台座(149×69) + »AUTO 文字(107×24)，两件都是图集原图。
+           位置照游戏：贴着对话框右边缘（right:0），纵向落在对话框高度的 3/4 线上
+           —— 窗 top 790 + 290×0.75 = 1007.5，牌高 69，故 top = 1007.5-34.5 ≈ 973。
+           动效照 AUTOSKIP 的 auto_show：15 帧（0.5s）从屏幕右缘外水平滑入 149px，
+           所以需要一个 overflow:hidden 的槽把滑出屏幕的那半截裁掉。 */
+        #st-autoslot {
+            position: absolute; right: 0; top: 973px; width: 149px; height: 69px;
+            overflow: hidden; pointer-events: none;
+        }
+        #st-autoplate {
+            position: absolute; left: 0; top: 0; width: 149px; height: 69px;
+            transform: translateX(100%);
+            transition: transform .5s cubic-bezier(.22,.61,.36,1), opacity .3s ease;
+            opacity: 0;
+        }
+        #st-autoplate.is-on { transform: translateX(0); opacity: 1; }
+        #st-autoplate img { position: absolute; display: block; }
+        #st-autoplate .ap-base { left: 0;  top: 0;  width: 149px; height: 69px; }
+        /* 文字相对台座左上角的偏移 (31,22)：层坐标 (10,-13) + 两个图标 origin 之差
+           （台座 origin 75,47；文字 origin 54,12） */
+        #st-autoplate .ap-text { left: 31px; top: 22px; width: 107px; height: 24px; }
+        /* 开场窗口还没铺完时先不露面 */
+        #st-hud:not(.is-open) #st-autoplate,
+        #st-hud:not(.is-open) #st-autoplate.is-on { opacity: 0; }
         #st-live-toggle { padding: 5px 12px; font-size: 12px; cursor: pointer; color: #9fb8b4;
             background: transparent; border: 1px solid rgba(233,185,110,.4); border-radius: 4px; }
         #st-live-toggle:hover, #st-live-toggle.is-active { color: #07141a; background: #e9b96e; border-color: #e9b96e; }
@@ -190,11 +407,114 @@
             outline: none; border-color: rgba(99,214,196,.6);
         }
         .st-field select:disabled, .st-field input:disabled { opacity: .45; }
+        .st-field input::placeholder { color: rgba(230,241,239,.28); }
+        .st-field-note { font-style: normal; font-size: 10px; color: rgba(230,241,239,.32); margin-left: 4px; }
+        .st-inline { display: flex; gap: 6px; }
+        .st-inline input { flex: 1; min-width: 0; }
+        .st-inline button {
+            flex: none; width: 30px; cursor: pointer; font-size: 12px; line-height: 1;
+            color: #9fb8b4; background: transparent;
+            border: 1px solid rgba(99,214,196,.25); border-radius: 4px;
+        }
+        .st-inline button:hover { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
+        .st-inline button:disabled { opacity: .3; cursor: default; }
+        .st-inline button:disabled:hover { color: #9fb8b4; background: transparent; border-color: rgba(99,214,196,.25); }
+        .st-field .st-cast-name { margin-top: 5px; }
         .st-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(230,241,239,.75); margin-bottom: 9px; }
         .st-check input { accent-color: #63d6c4; width: 13px; height: 13px; }
-        #st-custom {
-            border-left: 2px solid rgba(99,214,196,.25);
-            padding-left: 10px; margin-bottom: 9px;
+
+        /* ---- 登台角色：一张卡一个角色，三排＝身份/上下场、位置/缩放、本行动作/语音 ---- */
+        .st-stage-row {
+            margin-bottom: 8px; padding: 7px; font-size: 11px;
+            background: rgba(99,214,196,.05); border: 1px solid rgba(99,214,196,.16);
+            border-radius: 6px;
+        }
+        .st-stage-row.is-enter { border-color: rgba(99,214,196,.5); background: rgba(99,214,196,.1); }
+        .st-stage-row.is-exit { border-color: rgba(226,164,95,.42); background: rgba(226,164,95,.08); }
+        .st-stage-row.is-speaker { box-shadow: inset 2px 0 0 #63d6c4; }
+        .st-actor-top, .st-actor-row { display: flex; align-items: center; gap: 5px; }
+        .st-actor-row { margin-top: 4px; }
+        .st-actor-row > .lbl { flex: none; width: 24px; font-size: 10px; color: rgba(230,241,239,.36); }
+        .st-stage-row select, .st-stage-row input {
+            background: rgba(0,0,0,.35); color: #dceae7; font-size: 11px; font-family: inherit;
+            border: 1px solid rgba(99,214,196,.2); border-radius: 3px; padding: 3px 5px;
+        }
+        .st-stage-row .st-stage-role { flex: 1; min-width: 0; }
+        .st-stage-row .st-stage-x, .st-stage-row .st-stage-scale { flex: none; width: 54px; text-align: center; }
+        .st-stage-row .st-actor-row select[data-key] { flex: 1; min-width: 0; }
+        .st-actor-top > button, .st-stage-reset {
+            flex: none; width: 20px; height: 20px; padding: 0; cursor: pointer;
+            color: #9fb8b4; font-size: 11px; line-height: 1;
+            background: transparent; border: 1px solid rgba(99,214,196,.25); border-radius: 3px;
+        }
+        .st-actor-top > button:hover, .st-stage-reset:hover {
+            color: #07141a; background: #63d6c4; border-color: #63d6c4;
+        }
+        .st-stage-reset:disabled { opacity: .22; cursor: default; }
+        .st-stage-reset:disabled:hover { color: #9fb8b4; background: transparent; border-color: rgba(99,214,196,.25); }
+        /* 位置：第 1 行写的是全场默认；后面没改的行灰显沿用，改了就亮起来 */
+        .st-stage-row:not(.is-base):not(.is-own) .st-stage-x,
+        .st-stage-row:not(.is-base):not(.is-own) .st-stage-scale { opacity: .55; }
+        .st-stage-row.is-own .st-stage-x,
+        .st-stage-row.is-own .st-stage-scale { border-color: rgba(226,164,95,.5); }
+        #st-stage-add {
+            padding: 5px 10px; font-size: 11px; cursor: pointer;
+            color: #9fb8b4; background: transparent;
+            border: 1px dashed rgba(99,214,196,.35); border-radius: 4px;
+        }
+        #st-stage-add:hover { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
+
+        /* ---- 本行上下场：阵容行里的三态按钮 ---- */
+        .st-flag-seg {
+            flex: none; display: inline-flex; overflow: hidden;
+            border: 1px solid rgba(99,214,196,.2); border-radius: 4px;
+        }
+        .st-flag-seg button {
+            flex: none; width: auto; height: auto;
+            padding: 3px 6px; font: inherit; font-size: 10px; line-height: 1.4;
+            background: transparent; color: rgba(230,241,239,.5);
+            border: 0; border-left: 1px solid rgba(99,214,196,.14); border-radius: 0;
+            cursor: pointer;
+        }
+        .st-flag-seg button:first-child { border-left: 0; }
+        .st-flag-seg button:hover { color: #dceae7; background: rgba(99,214,196,.1); border-color: rgba(99,214,196,.14); }
+        .st-flag-seg button.is-on { color: #07141a; }
+        .st-flag-seg button.is-on.none { background: rgba(230,241,239,.4); }
+        .st-flag-seg button.is-on.enter { background: #63d6c4; }
+        .st-flag-seg button.is-on.exit { background: #e2a45f; }
+        .st-sec h3 .st-sec-sub {
+            margin-left: 8px; font-size: 10px; letter-spacing: 0;
+            color: rgba(230,241,239,.45);
+        }
+
+        /* ---- 行列表里的上/下场小标 ---- */
+        .st-line-flags { flex: none; display: inline-flex; gap: 3px; }
+        .st-line-flags:empty { display: none; }
+        .st-chip {
+            font-size: 10px; line-height: 1.5; padding: 0 4px; border-radius: 3px;
+            white-space: nowrap;
+        }
+        .st-chip.is-in { color: #63d6c4; background: rgba(99,214,196,.13); }
+        .st-chip.is-out { color: #e2a45f; background: rgba(226,164,95,.13); }
+        .st-chip.is-move { color: #8fd3e8; background: rgba(143,211,232,.12); }
+        .st-chip.is-cue { color: #c9a8f0; background: rgba(201,168,240,.13); }
+        .st-chip.is-name {
+            color: rgba(230,241,239,.72); background: rgba(230,241,239,.09);
+            max-width: 88px; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        /* ---- 自定义动作（对象 action）就地展开的字段 ---- */
+        .st-cue-field { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+        .st-cue-field > span { flex: none; width: 34px; font-size: 10px; color: rgba(230,241,239,.42); }
+        .st-cue-field select, .st-cue-field input {
+            flex: 1; min-width: 0; background: rgba(0,0,0,.35); color: #dceae7;
+            font-size: 11px; font-family: inherit;
+            border: 1px solid rgba(99,214,196,.2); border-radius: 3px; padding: 3px 5px;
+        }
+        .st-cue-field input.is-missing { border-color: rgba(226,164,95,.6); color: #e2a45f; }
+        .st-cue-custom {
+            margin-top: 5px; padding-left: 8px;
+            border-left: 2px solid rgba(226,164,95,.4);
         }
 
         #st-loading {
@@ -209,16 +529,17 @@
     </style>
 
     <!-- 加载顺序是 SDK 硬契约，与 steins_gate/index.html 保持一致 -->
-    <script src="../common/gl_arm_pose.js"></script>
-    <script src="../common/emote_config.js"></script>
-    <script src="../driver/emotedriver.js" charset="UTF-8"></script>
-    <script src="../driver/emoteplayer.js" charset="UTF-8"></script>
-    <script src="../libs/fflate.js"></script>
-    <script src="../common/model_loader.js"></script>
-    <script src="../common/lipsync.js"></script>
-    <script src="../common/config_validator.js"></script>
-    <script src="../common/action_config.js"></script>
-    <script src="../common/emote_core.js"></script>
+    <script src="../../common/gl_arm_pose.js"></script>
+    <script src="../../common/emote_config.js"></script>
+    <script src="../../driver/emotedriver.js" charset="UTF-8"></script>
+    <script src="../../driver/emoteplayer.js" charset="UTF-8"></script>
+    <script src="../../libs/fflate.js"></script>
+    <script src="../../common/model_loader.js"></script>
+    <script src="../../common/lipsync.js"></script>
+    <script src="../../common/config_validator.js"></script>
+    <script src="../../common/action_config.js"></script>
+    <script src="../../common/emote_core.js"></script>
+    <script src="ui/sg-dialog.js"></script>
     <script src="story.js"></script>
 </head>
 <body onload="EmoteDriver_Launch(startStory)">
@@ -228,7 +549,7 @@
     </div>
 
     <header id="st-bar">
-        <a class="st-home" href="../index.html" title="返回主页">← 主页</a>
+        <a class="st-home" href="../../index.html" title="返回主页">← 主页</a>
         <span class="st-brand">STORY MODE</span>
         <select id="st-scene" aria-label="场景"></select>
         <span id="st-msg"></span>
@@ -239,14 +560,35 @@
             <button type="button" data-mode="play" class="is-active">播放</button>
             <button type="button" data-mode="edit">编辑</button>
         </div>
+        <button type="button" id="st-full" title="全屏：隐藏浏览器边框与顶栏，只留画面">全屏</button>
     </header>
+
+    <button type="button" id="st-full-exit" title="退出全屏（Esc）">全屏中 · Esc</button>
 
     <canvas id="canvas"></canvas>
 
-    <div id="st-textbox">
+    <!-- 对话框：MSGWIN 底色 / 电路线闪层 / 名牌装饰线 + 名牌底板 + 白闪层
+         坐标全部照抄游戏（1920×1080），缩放交给 #st-hud 的 transform -->
+    <div id="st-hud">
+        <div class="hud-ly hud-win" data-hud="win"><img src="ui/msgwin.webp" alt=""></div>
+        <div class="hud-ly hud-lines" data-hud="lines"><img src="ui/msgwin_lines.webp" alt=""></div>
+        <div class="hud-ly hud-deco" data-hud="deco"></div>
+        <div class="hud-ly hud-name-w" data-hud="name-white"><img src="ui/nameplate_l.webp" alt=""></div>
+        <div class="hud-ly hud-name" data-hud="name"><img src="ui/nameplate_l.webp" alt=""></div>
         <div id="st-name"></div>
         <div id="st-text"></div>
-        <div id="st-hint">点击继续 ▸</div>
+        <span id="st-hint"></span>
+        <div id="st-caret" class="is-off"></div>
+        <div id="st-autoslot" aria-hidden="true">
+            <div id="st-autoplate">
+                <img class="ap-base" src="ui/auto_base.webp" alt="">
+                <img class="ap-text" src="ui/auto_text.webp" alt="">
+            </div>
+        </div>
+        <button type="button" id="st-auto" aria-pressed="false"
+                title="AUTO：等这句的语音放完自动翻页；点击画面可立即继续">
+            <img id="st-auto-img" src="ui/auto_off.webp" alt="AUTO">
+        </button>
     </div>
 
     <!-- 即时台词：不依赖剧本，输入文字 + 音频让当前角色开口 -->
@@ -310,19 +652,25 @@
                 </div>
 
                 <div class="st-sec">
+                    <h3>登台角色<span class="st-sec-sub">第 <span id="st-flag-idx">1</span> 行</span></h3>
+                    <div id="st-stage-list"></div>
+                    <button type="button" id="st-stage-add">＋ 添加角色</button>
+                    <datalist id="st-tl-list"></datalist>
+                    <div class="st-live-note">一张卡一个角色，三排：角色与这一句的上/下场 · 位置与缩放 · 本行的动作与语音。第 1 行的位置就是全场默认，后面不写就沿用上一句。</div>
+                </div>
+
+                <div class="st-sec">
                     <h3>第 <span id="st-sel-idx">1</span> 行</h3>
-                    <label class="st-field"><span>角色</span><select id="st-role"></select></label>
-                    <label class="st-field"><span>文本</span><textarea id="st-line-text" rows="4"></textarea></label>
-                    <label class="st-field"><span>语音</span><select id="st-voice"></select></label>
-                    <label class="st-field"><span>动作</span><select id="st-action"></select></label>
-                    <div id="st-custom" hidden>
-                        <label class="st-field"><span>存为宏（填名字后离开输入框）</span><input type="text" id="st-macro-name" placeholder="如：惊讶"></label>
-                        <label class="st-field"><span>timeline</span><input type="text" id="st-macro-tl" list="st-tl-list"></label>
-                        <label class="st-field"><span>diffSlot1</span><select id="st-macro-diff"></select></label>
-                        <datalist id="st-tl-list"></datalist>
+                    <label class="st-field"><span>说话者</span><select id="st-role"></select></label>
+                    <div class="st-field">
+                        <span>显示名 <em class="st-field-note">留空＝沿用上一句</em></span>
+                        <div class="st-inline">
+                            <input type="text" id="st-display-name" placeholder="沿用">
+                            <button type="button" id="st-name-default" title="填入角色本名">⟲</button>
+                        </div>
                     </div>
-                    <label class="st-check"><input type="checkbox" id="st-auto"> 自动推进</label>
-                    <label class="st-field"><span>停顿（ms）</span><input type="number" id="st-wait" min="0" step="100" value="1200"></label>
+                    <label class="st-field"><span>文本</span><textarea id="st-line-text" rows="4"></textarea></label>
+                    <label class="st-field"><span>AUTO 停顿（ms，留空＝1200）</span><input type="number" id="st-wait" min="0" step="100" placeholder="1200"></label>
                 </div>
 
                 <div class="st-sec">

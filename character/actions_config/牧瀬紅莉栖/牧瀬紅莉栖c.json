@@ -9,7 +9,7 @@
           "timeline": "表情_呆然",
           "diffSlot1": "いやいや",
           "diffSlot2": "がっかり",
-          "audio": "../character/sounds/krs/resg00_01_krs0005.xwma.opus",
+          "audio": "../../character/sounds/krs/resg00_01_krs0005.xwma.opus",
           "variables": [
             { "name": "face_eye_open_l", "value": 0, "duration": 500 },
             { "name": "face_eye_open_r", "value": 0, "duration": 500 },
@@ -28,7 +28,7 @@
           "timeline": "表情喜ぶ00",
           "diffSlot1": "笑い",
           "diffSlot2": "笑い",
-          "audio": "../character/sounds/krs/resg01_13_krs0040.xwma.opus",
+          "audio": "../../character/sounds/krs/resg01_13_krs0040.xwma.opus",
           "variables": [
             { "name": "face_eyebrow", "value": 10, "duration": 800 }
           ],
@@ -42,7 +42,7 @@
           "timeline": "表情_笑う",
           "diffSlot1": "ひく",
           "diffSlot2": "表情_照れる",
-          "audio": "../character/sounds/krs/resg11_08_krs0009.xwma.opus",
+          "audio": "../../character/sounds/krs/resg11_08_krs0009.xwma.opus",
           "variables": [
             { "name": "face_mouth", "value": 30, "duration": 500 },
             { "name": "face_eye_open_l", "value": 5, "duration": 30 },
@@ -62,7 +62,7 @@
           "timeline": "表情_照れる",
           "diffSlot1": "ぶりっこ",
           "diffSlot2": "",
-          "audio": "../character/sounds/krs/resg10_11k_krs0000.xwma.opus",
+          "audio": "../../character/sounds/krs/resg10_11k_krs0000.xwma.opus",
           "variables": [
             { "name": "face_cheek", "value": 1, "duration": 250 },
             { "name": "head_slant", "value": 2, "duration": 400 },
@@ -84,7 +84,7 @@
           "timeline": "表情_頬染め01n",
           "diffSlot1": "いやいや",
           "diffSlot2": "戸惑い",
-          "audio": "../character/sounds/krs/resg11_08_krs0010.xwma.opus",
+          "audio": "../../character/sounds/krs/resg11_08_krs0010.xwma.opus",
           "variables": [
             { "name": "head_LR", "value": 15, "duration": 400 },
             { "name": "head_UD", "value": -10, "duration": 430 },

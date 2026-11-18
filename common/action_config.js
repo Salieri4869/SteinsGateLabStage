@@ -18,7 +18,7 @@
 (function (root) {
     'use strict';
 
-    var CONFIG_ROOT = '../character/actions_config/';
+    var CONFIG_ROOT = '../../character/actions_config/';
 
     // 与 scene_ui.js:44 的 RAW_PSB_EXT 完全同源；两处必须同步修改。
     var RAW_PSB_EXT = /\.(?:psb\.m\.pure\.psb|psb\.m\.pure|psb\.m\.psb|pure\.psb|psb\.m|psb|pure)$/i;

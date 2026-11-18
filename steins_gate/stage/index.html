@@ -56,7 +56,7 @@
         html, body {
             width: 100%; height: 100%;
             overflow: hidden;
-            background: url('../static/background/background.jpg') center center / cover no-repeat;
+            background: url('../../static/background/background.jpg') center center / cover no-repeat;
             display: flex; justify-content: center; align-items: center;
         }
         #canvas {
@@ -142,23 +142,23 @@
         5) model_loader.js —— 下载/解压 zip、解析 PSB 结构、算姿势配置，
                               必须在业务脚本之前
         6) 业务脚本（config_validator / action_config / main / scene_ui）
-           动作配置不再由 JS 提供，改为 main.js 启动时按模型名读取 ../character/actions_config/
-        公共模块统一放在 ../common/，播放页与 /story 共用同一份；
+           动作配置不再由 JS 提供，改为 main.js 启动时按模型名读取 ../../character/actions_config/
+        公共模块统一放在 ../../common/，播放页与 /story 共用同一份；
         emote_core.js 必须在 main.js 之前（main.js 的 start() 调它启动 SDK）。
     -->
 
-    <script src="../common/gl_arm_pose.js"></script>
-    <script src="../common/emote_config.js"></script>
-    <script src="../driver/emotedriver.js" charset="UTF-8"></script>
-    <script src="../driver/emoteplayer.js" charset="UTF-8"></script>
-    <script src="../libs/fflate.js"></script>
+    <script src="../../common/gl_arm_pose.js"></script>
+    <script src="../../common/emote_config.js"></script>
+    <script src="../../driver/emotedriver.js" charset="UTF-8"></script>
+    <script src="../../driver/emoteplayer.js" charset="UTF-8"></script>
+    <script src="../../libs/fflate.js"></script>
 
     <!-- PSB 解析与姿势配置计算都内置在 model_loader.js 里，无需额外模块 -->
-    <script src="../common/model_loader.js"></script>
-    <script src="../common/lipsync.js"></script>
-    <script src="../common/config_validator.js"></script>
-    <script src="../common/action_config.js"></script>
-    <script src="../common/emote_core.js"></script>
+    <script src="../../common/model_loader.js"></script>
+    <script src="../../common/lipsync.js"></script>
+    <script src="../../common/config_validator.js"></script>
+    <script src="../../common/action_config.js"></script>
+    <script src="../../common/emote_core.js"></script>
     <script src="main.js"></script>
 
     <!-- 场景控制条：主页槽位 + 角色 tab + ⇅ 排序 / 切换背景 / ▲ 隐藏（纯 UI，不参与渲染） -->

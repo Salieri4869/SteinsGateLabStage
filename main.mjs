@@ -131,25 +131,13 @@ const sendJson = (res, code, obj) => send(res, code, JSON.stringify(obj) + '\n',
     { 'Content-Type': 'application/json; charset=utf-8' });
 
 /* 把 URL 路径映射到磁盘路径；任何越界一律 403，不做「尽力而为」
-   页面物理上收在 steins_gate/ 容器下，但对外 URL 保持 /story/、/steins_gate/ 不变，
-   于是这里做一层前缀重写：URL 短路径 → 容器内的真实目录。目录索引仍用
-   原始 URL 生成链接，浏览器里的相对路径（../common/ 等）也照旧以短 URL 为基准。
-   命中一条规则就 break：重写结果 /steins_gate/... 仍以 /steins_gate 开头，
-   若继续往下匹配会被第二条规则二次改写，故不能让规则链式生效。 */
-const URL_ALIAS = [
-    ['/story', '/steins_gate/story'],
-    ['/steins_gate', '/steins_gate/stage']
-];
+   URL 与物理目录一一对应：页面在 steins_gate/stage/ 与 steins_gate/story/，
+   对外就是 /steins_gate/stage/ 与 /steins_gate/story/，没有任何别名重写。
+   这样换成任意静态服务器也能直接跑，不存在只有本项目认识的前缀规则。 */
 function toDisk(urlPath) {
     let p;
     try { p = decodeURIComponent(urlPath.split('?')[0]); } catch (_) { return null; }
     if (p.includes('\0')) return null;
-    for (const [from, to] of URL_ALIAS) {
-        if (p === from || p.startsWith(from + '/')) {
-            p = to + p.slice(from.length);
-            break;
-        }
-    }
     const abs = resolve(join(ROOT, p));
     if (abs !== ROOT && !abs.startsWith(ROOT + sep)) return null;
     return abs;
@@ -305,9 +293,9 @@ function storyTarget(name) {
     if (name.length > 64 || BAD_CHARS.test(name) || name.includes('..') || name.startsWith('.')) {
         throw new Error('非法文件名');
     }
-    if (name === 'cast.json') return { abs: CAST_FILE, rel: 'story/cast.json', kind: 'cast' };
+    if (name === 'cast.json') return { abs: CAST_FILE, rel: 'steins_gate/story/cast.json', kind: 'cast' };
     if (!SCENE_NAME.test(name)) throw new Error('场景名须为小写字母/数字/连字符 + .json');
-    return { abs: join(SCENE_DIR, name), rel: 'story/scenes/' + name, kind: 'scene' };
+    return { abs: join(SCENE_DIR, name), rel: 'steins_gate/story/scenes/' + name, kind: 'scene' };
 }
 
 function validateStory(kind, data) {
@@ -318,21 +306,83 @@ function validateStory(kind, data) {
             if (!entry || typeof entry !== 'object' || typeof entry.model !== 'string' || !entry.model) {
                 throw new Error('角色「' + role + '」缺少 model');
             }
+            if (entry.name !== undefined && typeof entry.name !== 'string') {
+                throw new Error('角色「' + role + '」的 name（显示名）须为字符串');
+            }
         }
         return;
     }
     if (typeof data.title !== 'string') throw new Error('场景缺少 title');
     if (data.background !== undefined && typeof data.background !== 'string') throw new Error('background 须为字符串');
+    if (data.stage !== undefined) {
+        if (!Array.isArray(data.stage) || data.stage.length > 64) throw new Error('stage 须为数组（最多 64 人）');
+        data.stage.forEach((slot, i) => {
+            if (!slot || typeof slot !== 'object' || Array.isArray(slot)) throw new Error('stage 第 ' + (i + 1) + ' 项不是对象');
+            if (typeof slot.role !== 'string' || !slot.role) throw new Error('stage 第 ' + (i + 1) + ' 项缺少 role');
+            for (const k of ['x', 'scale', 'z']) {
+                if (slot[k] !== undefined && !Number.isFinite(slot[k])) throw new Error('stage 第 ' + (i + 1) + ' 项 ' + k + ' 须为数字');
+            }
+        });
+    }
     if (!Array.isArray(data.lines)) throw new Error('lines 必须是数组');
     if (data.lines.length > 2000) throw new Error('行数过多');
     data.lines.forEach((line, i) => {
         const at = '第 ' + (i + 1) + ' 行';
         if (!line || typeof line !== 'object' || Array.isArray(line)) throw new Error(at + '不是对象');
         if (typeof line.text !== 'string') throw new Error(at + '缺少 text');
-        for (const k of ['role', 'model', 'voice', 'action']) {
+        for (const k of ['role', 'model', 'voice', 'name']) {
             if (line[k] !== undefined && typeof line[k] !== 'string') throw new Error(at + k + ' 须为字符串');
         }
-        if (line.auto !== undefined && typeof line.auto !== 'boolean') throw new Error(at + 'auto 须为布尔值');
+        if (line.action !== undefined) {
+            if (typeof line.action === 'string') { /* 宏名 */ }
+            else if (!line.action || typeof line.action !== 'object' || Array.isArray(line.action)) {
+                throw new Error(at + 'action 须为宏名字符串或动作对象');
+            }
+        }
+        if (line.cues !== undefined) {
+            if (!line.cues || typeof line.cues !== 'object' || Array.isArray(line.cues)) {
+                throw new Error(at + 'cues 须为对象：{ 角色: { action, voice } }');
+            }
+            for (const [role, cue] of Object.entries(line.cues)) {
+                if (!role) throw new Error(at + 'cues 里有空角色名');
+                if (!cue || typeof cue !== 'object' || Array.isArray(cue)) {
+                    throw new Error(at + 'cues.' + role + ' 须为对象');
+                }
+                if (cue.voice !== undefined && typeof cue.voice !== 'string') {
+                    throw new Error(at + 'cues.' + role + '.voice 须为字符串');
+                }
+                if (cue.action !== undefined && typeof cue.action !== 'string'
+                    && (!cue.action || typeof cue.action !== 'object' || Array.isArray(cue.action))) {
+                    throw new Error(at + 'cues.' + role + '.action 须为宏名字符串或动作对象');
+                }
+            }
+        }
+        for (const k of ['enter', 'exit']) {
+            if (line[k] === undefined) continue;
+            const v = Array.isArray(line[k]) ? line[k] : [line[k]];
+            if (!v.every((r) => typeof r === 'string')) throw new Error(at + k + ' 须为角色名或数组');
+        }
+        if (line.move !== undefined) {
+            if (!line.move || typeof line.move !== 'object' || Array.isArray(line.move)) {
+                throw new Error(at + 'move 须为对象：{ 角色: 位置 }');
+            }
+            for (const [role, v] of Object.entries(line.move)) {
+                if (!role) throw new Error(at + 'move 里有空角色名');
+                if (typeof v === 'number') {
+                    if (!Number.isFinite(v)) throw new Error(at + 'move.' + role + ' 须为数字');
+                    continue;
+                }
+                if (!v || typeof v !== 'object' || Array.isArray(v)) {
+                    throw new Error(at + 'move.' + role + ' 须为数字或 { x, scale, z }');
+                }
+                for (const k of ['x', 'scale', 'z']) {
+                    if (v[k] !== undefined && !Number.isFinite(v[k])) {
+                        throw new Error(at + 'move.' + role + '.' + k + ' 须为数字');
+                    }
+                }
+            }
+        }
+        // auto 字段已废弃（自动推进改成播放界面的开关），旧文件仍可读，只校验 wait
         if (line.wait !== undefined && (!Number.isFinite(line.wait) || line.wait < 0)) {
             throw new Error(at + 'wait 须为非负数');
         }
@@ -758,8 +808,8 @@ server.listen(PORT, HOST, () => {
     const home = `http://${HOST}:${PORT}/`;
     console.log('E-mote 本地服务已启动');
     console.log(`角色档案首页  ${home}`);
-    console.log(`故事模式      ${home}story/index.html`);
-    console.log(`LAB 播放页    ${home}steins_gate/index.html`);
+    console.log(`故事模式      ${home}steins_gate/story/index.html`);
+    console.log(`LAB 播放页    ${home}steins_gate/stage/index.html`);
     console.log(`静态根目录  ${ROOT}`);
     console.log('Ctrl+C 停止');
     if (argv.includes('--open')) openBrowser(home);

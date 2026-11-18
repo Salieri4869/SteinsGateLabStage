@@ -195,9 +195,155 @@
         return { apply: apply, heightRatio: heightRatio };
     }
 
+    /* 在同一块画布 / 同一台 device 上追加一个角色。
+       与 create() 的区别：create() 负责「建 device + 建 renderCanvas + 第一个 player」，
+       这里只做「再 new 一个 player + 给它 attach 模型 + 对齐动作配置」，绝不重复
+       createRenderCanvas（那会替换掉 device 正在用的渲染缓冲，导致已加载角色出错）。
+       前置条件：create() 已经跑过一次；同页所有角色共用 canvas 与 device。
+       opts: { canvas, modelUrl, config?, configSource?, configOverrides?, canPlacePart? }
+       → Promise<{ player, config, configSource, armPose, canvas }> */
+    async function addCharacter(opts) {
+        opts = opts || {};
+        var canvas = opts.canvas || root.document.getElementById('canvas');
+        var modelUrl = opts.modelUrl || (opts.config && opts.config.model && opts.config.model.url);
+        if (!canvas) throw new Error('canvas 不存在');
+        if (!modelUrl) throw new Error('缺少 modelUrl');
+        if (typeof EmotePlayer === 'undefined') throw new Error('EmotePlayer 未加载');
+        if (!EmotePlayer.device) throw new Error('请先调用 SGEmoteCore.create() 建立 device');
+
+        var config = opts.config;
+        var configSource = opts.configSource || '';
+        if (!config) {
+            var loaded = await root.SGActionsConfig.load(modelUrl);
+            if (!loaded || !loaded.config) throw new Error('动作配置缺失：' + modelUrl);
+            config = buildConfig(loaded.config, modelUrl, opts.configOverrides);
+            configSource = loaded.source || '';
+        }
+
+        var player = new EmotePlayer(canvas);   // 构造函数内部会 requireDevice()，复用同一台
+        player.scale = config.model.scale != null ? config.model.scale : 0.8;
+        player.convolveCanvasMovementToPhysics = true;
+
+        if (opts.autoDestroy !== false) {
+            root.addEventListener('pagehide', function (evt) {
+                if (evt.persisted) return;
+                try { player.destroy(); } catch (_) { /* 卸载阶段 wasm 可能已拆除 */ }
+            }, { once: true });
+        }
+
+        var pose = await ModelLoader.attach(player, config.model.url, config.armPose || 'crossed');
+        player.diffTimelineSlot3 = '';
+        player.diffTimelineSlot4 = '';
+
+        if (root.SGActionsConfig && typeof root.SGActionsConfig.reconcile === 'function') {
+            try {
+                var place = opts.canPlacePart || canPlacePart;
+                root.SGActionsConfig.reconcile(config, player, configSource,
+                    function (key) { return place(player, key); });
+            } catch (err) {
+                console.warn('[EmoteCore] 追加角色 ' + modelUrl + ' 库存对齐失败', err);
+            }
+        }
+        return { player: player, config: config, configSource: configSource,
+                 armPose: pose, canvas: canvas };
+    }
+
+    /* 多角色横向布局：与 createLayout 一样用视口高度算基准缩放，但每个角色可各自
+       指定水平位置 x（画布宽度比例，0 居中 / -1 最左 / +1 最右）与缩放系数 scale。
+       所有角色共用一块 canvas 与一条 resize 监听；coord 是 SDK 内部缓冲坐标。
+       members: [{ player, x, scale }]（运行时原地改这个数组后再调 apply() 即可）
+       opts: { verticalOffsetRatio, canvas, debug } → { apply, heightRatio } */
+    function createCastLayout(members, opts) {
+        opts = opts || {};
+        var canvas = opts.canvas || (members[0] && members[0].player && members[0].player.canvas);
+        var offsetRatio = opts.verticalOffsetRatio != null ? opts.verticalOffsetRatio : 0.5;
+        var debug = !!opts.debug;
+        var baseOf = [];                    // 按 player 记住原始 coord，重建 stage 时不漂移
+        var initialized = false;
+        var frame = null;
+
+        function heightRatio(height) {
+            var h1 = 600, r1 = 0.3, h2 = 1600, r2 = 0.9;
+            var m = (r2 - r1) / (h2 - h1);
+            return Math.max(0.05, m * height + r1 - m * h1);
+        }
+
+        function rememberBase() {
+            baseOf.forEach(function (e) { e.stale = true; });
+            members.forEach(function (m) {
+                var hit = null;
+                for (var i = 0; i < baseOf.length; i++) {
+                    if (baseOf[i].player === m.player) { hit = baseOf[i]; break; }
+                }
+                var c = m.player.coord;
+                if (!hit) baseOf.push({ player: m.player, coord: [c[0], c[1]], stale: false });
+                else if (hit.stale) { hit.coord = [c[0], c[1]]; hit.stale = false; }
+            });
+            baseOf = baseOf.filter(function (e) {
+                return !e.stale && members.some(function (m) { return m.player === e.player; });
+            });
+        }
+        function baseFor(player, fallbackIndex) {
+            for (var i = 0; i < baseOf.length; i++) {
+                if (baseOf[i].player === player) return baseOf[i].coord;
+            }
+            var c = player.coord;
+            return [c[0], c[1]];
+        }
+
+        function apply() {
+            var body = root.document && root.document.body;
+            var w = root.innerWidth || (body && body.clientWidth) || 1;
+            var h = root.innerHeight || (body && body.clientHeight) || 1;
+            var dpr = root.devicePixelRatio || 1;
+            var bw = Math.round(w * dpr);
+            var bh = Math.round(h * dpr);
+            if (bw > MAX_TEXTURE_SIZE || bh > MAX_TEXTURE_SIZE) {
+                var k = Math.min(MAX_TEXTURE_SIZE / bw, MAX_TEXTURE_SIZE / bh);
+                bw = Math.round(bw * k);
+                bh = Math.round(bh * k);
+            }
+            if (canvas) {
+                canvas.style.width = w + 'px';
+                canvas.style.height = h + 'px';
+                if (!initialized) {
+                    canvas.width = bw;
+                    canvas.height = bh;
+                    initialized = true;
+                }
+            }
+            if (!baseOf.length) rememberBase();
+            var base = heightRatio(h);
+            members.forEach(function (m, i) {
+                var baseC = baseFor(m.player, i);
+                var x = Number(m.x) || 0;                 // 画布宽度比例
+                var mul = Number.isFinite(m.scale) ? m.scale : 1;
+                m.player.scale = base * mul;
+                // x=-1 贴左、+1 贴右：可移动范围约半个画布宽，避免角色被裁掉
+                m.player.coord = [baseC[0] + x * bw * 0.5,
+                                  baseC[1] - (0.5 - offsetRatio) * bh];
+            });
+            if (typeof EmotePlayer !== 'undefined' && EmotePlayer.device) {
+                EmotePlayer.device.invalidateAnimation();
+            }
+            if (debug) console.log('🎭 多角色布局: ' + members.length + ' 人 base=' + base.toFixed(3));
+        }
+
+        rememberBase();
+        apply();
+        root.addEventListener('resize', function () {
+            if (frame !== null) root.cancelAnimationFrame(frame);
+            frame = root.requestAnimationFrame(function () { frame = null; apply(); });
+        });
+        return { apply: apply, heightRatio: heightRatio, rememberBase: rememberBase,
+                 members: members };
+    }
+
     root.SGEmoteCore = {
         create: create,
         createLayout: createLayout,
+        addCharacter: addCharacter,
+        createCastLayout: createCastLayout,
         buildConfig: buildConfig,
         rectOf: rectOf,
         canPlacePart: canPlacePart,

@@ -59,7 +59,7 @@ function firstIndexedPath() {
     }
     return '';
 }
-function toModelUrl(path) { return path ? '../character/data/' + path : ''; }
+function toModelUrl(path) { return path ? '../../character/data/' + path : ''; }
 
 // 显式指定（URL / 本地记忆）能同步定下来；都没有时留空，交给 start() 问扫描结果
 const INITIAL_MODEL_URL = (function () {

@@ -1,5 +1,5 @@
 {
-  "doc": "示例剧本。background 为 static/background/ 下的文件名；role 与 action 引用 cast.json；voice 为 voiceDir 下的文件名，留空或省略则不播语音。auto=true 时按 wait 毫秒自动推进，否则点击推进；不写的字段一律取默认值。",
+  "doc": "示例剧本（双人同台）。background 为 static/background/ 下的文件名；role 与 action 引用 cast.json；voice 为 voiceDir 下的文件名，留空或省略则不播语音；auto=true 时按 wait 毫秒自动推进，否则点击推进。stage 列出本场角色与站位：x 为画布宽度比例（-1 最左 / +1 最右），scale 为相对缩放，z 为叠放次序；可省略，省略时按台词里出现的角色自动均分。台词里写过 enter 的角色开场默认隐藏，到那一句才上场；exit 让角色从那一句起退场。cues 给同台其他角色本行各自的动作与语音：{ 角色: { action, voice } }，各走各的播放器，与说话者互不打断。",
   "title": "未来道具研究所 · 夜",
   "background": "background.jpg",
   "lines": [
@@ -7,7 +7,10 @@
       "role": "红莉栖",
       "text": "……比预计早了三分钟。",
       "action": "平常",
-      "voice": ""
+      "voice": "",
+      "enter": [
+        "红莉栖"
+      ]
     },
     {
       "role": "红莉栖",
@@ -17,17 +20,73 @@
     },
     {
       "role": "红莉栖",
+      "text": "门没锁？——等等，外面还有脚步声。",
+      "action": "惊讶",
+      "voice": ""
+    },
+    {
+      "role": "铃羽",
       "text": "别站在门口，进来。",
-      "action": "困扰",
-      "voice": "resg00_01_krs0007.xwma.opus"
+      "action": "微笑",
+      "enter": [
+        "铃羽"
+      ],
+      "voice": "",
+      "exit": [
+        "红莉栖"
+      ],
+      "cues": {
+        "红莉栖": {
+          "action": "困扰"
+        }
+      }
     },
     {
       "role": "红莉栖",
       "text": "……",
       "action": "惊讶",
       "voice": "",
-      "auto": true,
-      "wait": 1200
+      "wait": 1200,
+      "enter": [
+        "红莉栖"
+      ]
+    },
+    {
+      "role": "铃羽",
+      "text": "刚才在楼下被会长逮住问了一堆奇怪的问题。",
+      "action": "开心",
+      "voice": "",
+      "move": {
+        "红莉栖": {
+          "scale": 1.5
+        },
+        "铃羽": {
+          "scale": 1.5
+        }
+      }
+    },
+    {
+      "role": "红莉栖",
+      "text": "先回去吧，明天再说。",
+      "action": "困扰",
+      "exit": [
+        "铃羽"
+      ],
+      "voice": ""
+    }
+  ],
+  "stage": [
+    {
+      "role": "红莉栖",
+      "x": -0.35,
+      "scale": 1.5,
+      "z": 0
+    },
+    {
+      "role": "铃羽",
+      "x": 0.38,
+      "scale": 1.5,
+      "z": 1
     }
   ]
 }

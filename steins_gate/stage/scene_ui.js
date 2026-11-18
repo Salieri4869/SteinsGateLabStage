@@ -5,7 +5,7 @@
 //  切换背景 / ▲ 隐藏；收起后鼠标移入页面顶端滑出「▼ 显示控制条」。
 //
 //  数据来源：
-//    角色与造型  ../character/data/ 的目录索引，文件夹名即角色名，文件名即造型名。
+//    角色与造型  ../../character/data/ 的目录索引，文件夹名即角色名，文件名即造型名。
 //                支持 *.zip 与裸 PSB（*.psb / *.psb.m / *.pure.psb）；
 //                目录索引不可用时用 localStorage 里的上次扫描结果兜底。
 //    tab 顺序    character/actions_config/order.json 的 roles，缺省按名字排。
@@ -25,7 +25,7 @@
 (function () {
     'use strict';
 
-    // 角色与造型来自 ../character/data/ 的目录索引：丢文件即出现，显示名由文件名推断；
+    // 角色与造型来自 ../../character/data/ 的目录索引：丢文件即出现，显示名由文件名推断；
     // 要单独改名就写 character/actions_config/<角色>/<模型>.json 的 "name"。
     /* 裸 PSB（不压缩，直接把文件丢进角色文件夹，如 柳木詩夢/shi_45.pure.psb）。
        备选分支必须由长到短，否则 ".psb" 会抢先匹配、只剥掉一层后缀，
@@ -46,7 +46,7 @@
     window.SGStripModelExt = stripModelExt;
     var MODEL_KNOWN_KEY = 'sg-models-known-v1';    // 上次扫描到的全部造型路径（基线）
     var MODEL_UNREAD_KEY = 'sg-models-unread-v1';  // 新增、但还没打开看过的造型路径
-    var CONFIG_ROOT = '../character/actions_config/';  // 造型显示名 / 角色顺序的可选来源
+    var CONFIG_ROOT = '../../character/actions_config/';  // 造型显示名 / 角色顺序的可选来源
     var modelNames = {};           // '<角色>/<词干>' → 配置 JSON 里的 name（造型显示名）
     /* 角色 tab 顺序：只认 character/actions_config/order.json（写文件夹名，其余自动追加）。
        面板里调完自动写回文件；文件没有就退回纯自动序。 */
@@ -392,7 +392,7 @@
         return { file: file, name: role, sub: sub };
     }
 
-    /* 唯一数据源：../character/data/ 的 HTTP 目录索引。目录里一层角色文件夹，
+    /* 唯一数据源：../../character/data/ 的 HTTP 目录索引。目录里一层角色文件夹，
        每个文件夹内是模型——任何 *.zip 或未压缩的裸 PSB 都认。
        不同静态服务器给目录链接加不加
        尾斜杠不一致，所以除 zip 外的条目都当作「候选文件夹」探测一次，
@@ -528,7 +528,7 @@
     }
 
     function fetchModelTree() {
-        return fetchIndex('../character/data/').then(function (rootText) {
+        return fetchIndex('../../character/data/').then(function (rootText) {
             if (rootText == null) return null;
             var links = parseIndex(rootText);
             var rootFiles = links.filter(function (l) {
@@ -536,7 +536,7 @@
             }).map(function (l) { return l.name; });
             var candidates = links.filter(function (l) { return !isModelFile(l.name); });
             return Promise.all(candidates.map(function (c) {
-                var url = '../character/data/' + encodeURIComponent(c.name) + '/';
+                var url = '../../character/data/' + encodeURIComponent(c.name) + '/';
                 return fetchIndex(url)
                     .then(function (t) { return t == null ? fetchIndex(url) : t; }) // 一次重试，抗瞬时漏读
                     .then(function (t) {
@@ -893,7 +893,7 @@
        只有 main.mjs 起的服务带写盘接口（响应头里有 X-Emote-Server）；
        没有服务时顺序只留在本次会话，提示会直说，不假装保存成功。 */
     var ORDER_REL = 'character/actions_config/order.json';
-    var ORDER_API = '../api/order';
+    var ORDER_API = '../../api/order';
     var orderServer = null;          // null = 还没遇到 node 服务；true = 有写盘接口
     var orderSaving = false;
     var orderSaveTimer = 0;
@@ -1320,7 +1320,7 @@
         setTimeout(function () { location.href = url.toString(); }, 80);
     }
 
-    function bgUrl(file) { return '../static/background/' + encodeURIComponent(file); }
+    function bgUrl(file) { return '../../static/background/' + encodeURIComponent(file); }
 
     function stemOf(file) { return file.replace(/\.[^.]+$/, ''); }
 
@@ -1428,8 +1428,8 @@
     /* ---- 磁盘缩略图：生成一次 → 落盘 → 之后只读小图 ----
        main.mjs 提供 GET /api/thumbs（已有清单）与 PUT /api/thumb?name=原图名。
        没有写盘接口（非 main.mjs 起的静态服务）时只读已有文件，不生成。 */
-    var THUMB_DIR = '../static/background/.thumbs/';
-    var THUMB_PUT = '../api/thumb';
+    var THUMB_DIR = '../../static/background/.thumbs/';
+    var THUMB_PUT = '../../api/thumb';
     var THUMB_W = 1280, THUMB_H = 720, THUMB_Q = 0.9;
 
     function thumbNameList(text) {
@@ -1608,7 +1608,7 @@
 
     /* 唯一数据源：HTTP 目录索引。返回 null 表示服务器不支持列目录。 */
     function fetchDirectory() {
-        return fetch('../static/background/?t=' + Date.now(), { cache: 'no-store' })
+        return fetch('../../static/background/?t=' + Date.now(), { cache: 'no-store' })
             .then(function (r) { return r.ok ? r.text() : null; })
             .then(function (text) {
                 if (text == null) return null;
@@ -1775,7 +1775,7 @@
 
         // 收起态提示条：保留一个轻量的「← 主页」入口，右侧仍是「显示控制条」
         peek = el('div', 'sg-peek');
-        peek.innerHTML = '<a id="sg-peek-home" href="../index.html" title="返回主页 · STEINS;GATE">'
+        peek.innerHTML = '<a id="sg-peek-home" href="../../index.html" title="返回主页 · STEINS;GATE">'
             + '← 主页</a><button id="sg-peek-btn" type="button" aria-controls="sg-bar" '
             + 'title="显示控制条（或按 ESC）"><i>▼</i> 显示控制条</button>';
         top.appendChild(peek);
@@ -1788,7 +1788,7 @@
         // 但不在滚动容器里 —— 横向滚动时模型 tab 永远不会压到它。
         homeSlot = el('div', 'sg-home-slot');
         home = el('a', 'sg-home', 'sg-home-tab');
-        home.href = '../index.html';
+        home.href = '../../index.html';
         home.title = '返回主页 · STEINS;GATE';
         home.setAttribute('aria-label', '返回主页');
         home.innerHTML = '<b>← 主页</b><i>HOME</i>';
@@ -1956,7 +1956,7 @@
         showPreview({ file: currentBg, label: curMeta.label, groupLabel: curMeta.groupLabel });
         setPinned(true);   // 默认固定展开，不依赖鼠标位置
 
-        // 异步把内置列表换成 ../character/data/ 的真实目录；成功与否都不影响控制条可用。
+        // 异步把内置列表换成 ../../character/data/ 的真实目录；成功与否都不影响控制条可用。
         // 这个 promise 也交给 main.js：首次访问本地还没有索引时，靠它决定默认模型。
         readyScan = refreshModels();
 
