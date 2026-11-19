@@ -986,40 +986,54 @@ details.ed-fold[open]>summary::before{content:'\\25BE '}
         player.setVariable(s.v.label, 0, 0);
     }));
     // 复制当前变量值为 variables 数组 JSON，可直接粘进 cast.json 动作的 variables 字段。
-    // 变量名用完整 label（不是短名），duration 默认 0（setVariable 会走 SDK 默认淡入）。
-    // value 为 0 的项不复制：0 通常是复位态，粘进动作里没有意义。
-    const copyVars = btn('复制参数');
-    copyVars.title = '复制当前非零滑杆值：[{name,value,duration}, ...]（value=0 的已排除），粘贴到 cast.json 动作的 variables';
-    copyVars.addEventListener('click', async () => {
-        const payload = sliders
-            .map((s) => ({ name: s.v.label, value: Number(s.range.value) || 0, duration: 0 }))
-            .filter((x) => x.value !== 0);
-        const text = JSON.stringify(payload, null, 2);
-        let ok = false;
+    // 变量名用完整 label（不是短名）；duration 写 DEFAULT_FADE_TIME（300ms），
+    // 这样粘进 cast.json 后变量是平滑淡入，而不是瞬间跳变。
+    // 两个按钮：复制参数（只导非零）/ 复制完整参数（含 value=0 的全部变量）。
+    const copyText = async (text) => {
         try {
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 await navigator.clipboard.writeText(text);
-                ok = true;
+                return true;
             }
         } catch (_) { /* 非安全上下文等场景回退到 execCommand */ }
-        if (!ok) {
-            const ta = el('textarea');
-            ta.value = text;
-            ta.style.cssText = 'position:fixed;left:-9999px;top:0';
-            document.body.appendChild(ta);
-            ta.select();
-            try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
-            document.body.removeChild(ta);
-        }
-        copyVars.textContent = !ok ? '复制失败'
-            : (payload.length ? '已复制 ✓' : '无非零值');
-        if (config && config.debug) console.log('[DevPanel] 复制变量参数', text);
-        setTimeout(() => { copyVars.textContent = '复制参数'; }, 1500);
-    });
+        const ta = el('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+        document.body.removeChild(ta);
+        return ok;
+    };
+    const bindCopy = (button, label, includeZero) => {
+        button.addEventListener('click', async () => {
+            let payload = sliders.map((s) => ({
+                name: s.v.label, value: Number(s.range.value) || 0, duration: DEFAULT_FADE_TIME
+            }));
+            if (!includeZero) payload = payload.filter((x) => x.value !== 0);
+            const text = JSON.stringify(payload, null, 2);
+            const ok = await copyText(text);
+            button.textContent = !ok ? '复制失败'
+                : (payload.length ? '已复制 ✓' : (includeZero ? '无变量' : '无非零值'));
+            if (config && config.debug) console.log('[DevPanel] ' + label, text);
+            setTimeout(() => { button.textContent = label; }, 1500);
+        });
+    };
+
+    const copyVars = btn('复制参数');
+    copyVars.title = '复制当前非零滑杆值：[{name,value,duration}, ...]（value=0 的已排除；duration=300ms），粘贴到 cast.json 动作的 variables';
+    bindCopy(copyVars, '复制参数', false);
+
+    const copyAll = btn('复制完整参数');
+    copyAll.title = '复制全部滑杆值（含 value=0）：[{name,value,duration}, ...]（duration=300ms），用于需要显式复位的完整动作配置';
+    bindCopy(copyAll, '复制完整参数', true);
+
     const varFoot = el('div', 'ed-foot');
     varFoot.appendChild(refresh);
     varFoot.appendChild(zero);
     varFoot.appendChild(copyVars);
+    varFoot.appendChild(copyAll);
     secVars.body.appendChild(varFoot);
     secVars.wrap.id = 'ed-sec-vars';
     body.appendChild(secVars.wrap);

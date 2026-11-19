@@ -21,6 +21,67 @@
       },
       "害羞": {
         "timeline": "表情_照れる"
+      },
+      "吃惊": {
+        "timeline": "表情_驚き00",
+        "diffSlot1": "疑問",
+        "diffSlot2": "疑問_固定",
+        "variables": [
+          {
+            "name": "head_UD",
+            "value": 83,
+            "duration": 100,
+            "delay": 0
+          },
+          {
+            "name": "head_slant",
+            "value": 82,
+            "duration": 100,
+            "delay": 0
+          },
+          {
+            "name": "body_UD",
+            "value": 100,
+            "duration": 1000,
+            "delay": 0
+          },
+          {
+            "name": "face_eye_open",
+            "value": 8,
+            "duration": 1000,
+            "delay": 0
+          },
+          {
+            "name": "face_eye_sp",
+            "value": 7,
+            "duration": 1000,
+            "delay": 0
+          },
+          {
+            "name": "face_eyebrow",
+            "value": 21,
+            "duration": 100,
+            "delay": 0
+          },
+          {
+            "name": "face_talk",
+            "value": 27,
+            "duration": 100,
+            "delay": 0
+          },
+          {
+            "name": "face_eye_open_l",
+            "value": 0,
+            "duration": 0,
+            "delay": 0
+          },
+          {
+            "name": "face_eye_open_r",
+            "value": 0,
+            "duration": 0,
+            "delay": 0
+          }
+        ]
       }
     }
   },
@@ -52,7 +113,39 @@
       },
       "生气": {
         "timeline": "表情_怒る00",
-        "diffSlot1": "ぷんぷん"
+        "diffSlot1": "うん",
+        "variables": [
+          {
+            "name": "head_slant",
+            "value": 42,
+            "duration": 0,
+            "delay": 0
+          },
+          {
+            "name": "face_eye_open_l",
+            "value": 4,
+            "duration": 0,
+            "delay": 0
+          },
+          {
+            "name": "face_eye_open_r",
+            "value": 4,
+            "duration": 0,
+            "delay": 0
+          },
+          {
+            "name": "face_eyebrow",
+            "value": 19,
+            "duration": 0,
+            "delay": 0
+          },
+          {
+            "name": "face_mouth_sp",
+            "value": 10,
+            "duration": 0,
+            "delay": 0
+          }
+        ]
       },
       "失落": {
         "timeline": "表情_落ち込む",

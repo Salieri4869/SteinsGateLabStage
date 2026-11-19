@@ -1,8 +1,16 @@
 /* sg-dialog.js —— 剧情模式的对话框，用从 main.psb.m 拆出的 MSGWIN / name 还原
  *
+ *  素材：main.psb/tex#000-texture.png 里上下排着 5 块 1920×290 的对话框层，
+ *        全部按原矩形切出、无损转 webp（ui/msgwin_1..5_*.webp），开场 60 帧里都用上：
+ *          1_lines 白色电路线（線のみ / 線のみ反転 两次擦除用的同一张）
+ *          2_grad  灰渐变窗底（ベースグラデ 下的 ウィンドウ）
+ *          3_dark  深色窗芯（中间那块黑色区域）
+ *          4_dim   暗灰电路线（常态留在窗口上的装饰）
+ *          5_mid   中间调电路线（白线转灰的过渡）
+ *        另有 nameplate_* / namedeco_* / auto_* 等小件来自 tex#000 / tex#001。
+ *
  *  数据来源：main.psb.m 的 MSGWIN.show（88 帧）与 name.wipe_*（30 帧）
- *    MSGWIN.show 0–59 帧：窗口底色擦入
- *                 0–29 帧：电路线擦入，30–59 帧反向擦出
+ *    MSGWIN.show 0–59 帧：白线两侧擦入（0–29）、反向擦出（30–59）；窗底渐变 0–59 擦入
  *                 50–58 帧：装饰线与名牌淡入
  *    MSGWIN.deco_show：装饰线从中心向外擦开（29 帧），白线闪层收尾
  *                      → AUTO 打开时装饰线跑「充能」：上排从左往右铺满、下排从名牌中心向两侧展开，
@@ -64,6 +72,44 @@
         node.style.webkitMaskImage = css;
         node.style.maskImage = css;
         node.style.visibility = reveal <= 0.0015 ? 'hidden' : 'visible';
+    }
+
+    /* 两侧向中间的对称擦入：reveal 0 全隐 / 1 全显。
+       录像里白线是从左右两头往中间铺（第 1 帧只有边框和角标、第 2 帧才铺满），
+       单向的 linear wipe 会从最左边一路推到右，完全不是那个形状。 */
+    function wipeSides(node, reveal) {
+        if (!node) return;
+        if (reveal >= 0.999) {                 // 完全合拢时撤掉遮罩，别在正中留一条透明缝
+            node.style.webkitMaskImage = 'none';
+            node.style.maskImage = 'none';
+            node.style.visibility = 'visible';
+            return;
+        }
+        var a = clamp01(reveal) * 50;
+        var f = Math.min(3, Math.max(0, 50 - a) * 2 + 0.2);   // 快合拢时收窄软边，别在正中留一条缝
+        var css = 'linear-gradient(90deg, #000 0%, #000 ' + Math.max(0, a - f) + '%,'
+            + ' rgba(0,0,0,0) ' + a + '%, rgba(0,0,0,0) ' + (100 - a) + '%,'
+            + ' #000 ' + Math.min(100, 100 - a + f) + '%, #000 100%)';
+        node.style.webkitMaskImage = css;
+        node.style.maskImage = css;
+        node.style.visibility = reveal <= 0.0015 ? 'hidden' : 'visible';
+    }
+
+    /* 整层淡入（不做擦除），用于窗芯与常态电路线 */
+    function fadeLayer(node, alpha, max) {
+        if (!node) return;
+        var a = clamp01(alpha) * (max == null ? 1 : max);
+        node.style.opacity = String(a);
+        node.style.visibility = a <= 0.002 ? 'hidden' : 'visible';
+    }
+
+    /* 中间那块深色窗芯：从正中向左右撑开（录像第 3→4 帧黑色区域由窄变宽） */
+    function openCenter(node, reveal, max) {
+        if (!node) return;
+        var r = clamp01(reveal);
+        var x = (1 - r) * 50;
+        node.style.clipPath = 'inset(0 ' + x + '% 0 ' + x + '%)';
+        fadeLayer(node, r, max);
     }
 
     /* ---------- 装饰线跑马灯 ---------- */
@@ -130,14 +176,38 @@
         if (st.auto && st.open > 58) runDeco();
     }
 
-    /* 60 帧窗口开场：底色擦入 / 电路线一闪 / 装饰与名牌跟上
-       电路线（main/white）整层是纯白线稿，原速铺满会有 1 秒刺眼，
-       这里压到 55% 亮度并缩成一次「扫过」的闪光（8 帧进、26 帧退）。 */
+    /* 60 帧窗口开场，5 层素材全部参与（都是 tex#000 里同一张 1920×290 的五个变体）：
+         0–18   白色电路线从左右两头往中间擦入（录像第 1→2 帧：先是稀疏边框/角标，再铺满）
+         14–34  中间调电路线淡入，把纯白线过渡成灰白（第 3 帧）
+         20–46  深色窗芯从正中向两侧撑开、暗灰电路线随后亮起（第 3→4 帧的黑窗口与倒 V 装饰）
+         46–59  四层电路线/窗芯陆续淡出，窗口回到 MSGWIN.normal 的干净常态（第 5 帧）
+         50–58  装饰线与名牌淡入
+       PSB 的 MSGWIN.show 里 線のみ / 線のみ反転 是同一张 white 用两个内置遮罩擦入、擦出；
+       MSGWIN.normal 只留 ウィンドウ 一层 —— 所以常态不该有铺满的电路线。 */
     function paintWindow(t) {
         st.open = t;
-        wipe(el.win, clamp01(t / 59));
-        var lines = t <= 8 ? clamp01(t / 8) : clamp01(1 - (t - 8) / 26);
-        wipe(el.lines, lines);
+
+        wipeSides(el.win, clamp01(t / 59));                 // 灰渐变窗底：0–59 擦入，与 PSB ベースグラデ 同长
+
+        var lineIn = clamp01(t / 18);
+        var lineOut = clamp01((t - 26) / 20);
+        var lineReveal = t <= 26 ? lineIn : 1 - lineOut;
+        wipeSides(el.lines, lineReveal);                    // 白线：先对称擦入，再对称擦出
+        fadeLayer(el.lines, lineReveal * 0.9, 1);
+
+        var midIn = clamp01((t - 14) / 12);
+        var midOut = clamp01((t - 34) / 14);
+        fadeLayer(el.mid, Math.min(midIn, 1 - midOut) * 0.85, 1);   // 中间调线：白转灰的过渡
+
+        var dimIn = clamp01((t - 28) / 12);
+        var dimOut = clamp01((t - 44) / 14);
+        fadeLayer(el.dim, Math.min(dimIn, 1 - dimOut) * 0.9, 1);     // 暗灰线：第 4 帧的倒 V 装饰
+
+        var darkIn = clamp01((t - 20) / 20);
+        var darkOut = clamp01((t - 44) / 14);
+        openCenter(el.dark, darkIn, 0.92);                  // 深色窗芯：从正中撑开
+        if (el.dark) el.dark.style.opacity = String(darkIn * 0.92 * (1 - darkOut));
+
         var a = clamp01((t - 50) / 8);
         if (el.deco) {
             el.deco.style.opacity = String(a);
@@ -160,13 +230,17 @@
         }
     }
 
+    /* 线性补间：起点用调用时刻的 performance.now()，不用 rAF 的 ts。
+       原因：模型加载会把主线程堵住一两秒，期间 rAF 队列里积压的帧带着
+       「阻塞之前」的旧时间戳（实测首帧 ts 比真正调用早 1.08s）。
+       拿它当 t0，第二帧算出的进度就已经 >1，1.1 秒的开场被一帧跳到底——
+       表现就是「进剧情模式时对话框已经铺好了」。 */
     function run(from, to, dur, fn, done) {
         if (st.raf) cancelAnimationFrame(st.raf);
-        var t0 = 0;
+        var t0 = performance.now();
         fn(from);
-        st.raf = requestAnimationFrame(function step(ts) {
-            if (!t0) t0 = ts;
-            var k = Math.min(1, (ts - t0) / dur);
+        st.raf = requestAnimationFrame(function step() {
+            var k = Math.min(1, (performance.now() - t0) / dur);
             fn(from + (to - from) * k);
             if (k < 1) st.raf = requestAnimationFrame(step);
             else { st.raf = 0; if (done) done(); }
@@ -268,6 +342,9 @@
         el.hud = $('st-hud');
         if (!el.hud) return null;
         el.win = el.hud.querySelector('[data-hud="win"]');
+        el.dark = el.hud.querySelector('[data-hud="dark"]');
+        el.dim = el.hud.querySelector('[data-hud="dim"]');
+        el.mid = el.hud.querySelector('[data-hud="mid"]');
         el.lines = el.hud.querySelector('[data-hud="lines"]');
         el.deco = el.hud.querySelector('[data-hud="deco"]');
         el.name = el.hud.querySelector('[data-hud="name"]');

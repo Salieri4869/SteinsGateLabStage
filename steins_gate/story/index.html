@@ -94,9 +94,18 @@
         html[data-mode="edit"] #st-hud { display: none; }
         #st-hud .hud-ly { position: absolute; }
         #st-hud .hud-ly img { display: block; width: 100%; height: 100%; }
-        #st-hud .hud-win   { left: 0;    top: 790px;  width: 1920px; height: 290px; }
-        /* 电路线整层是纯白线稿，压到 55% 当「扫过」的闪光用，不然刺眼 */
-        #st-hud .hud-lines { left: 0;    top: 790px;  width: 1920px; height: 290px; opacity: .55; }
+        /* tex#000-texture.png 里上下排着 5 块 1920×290 的对话框层，全部拆成 webp：
+             1_lines 白色电路线 / 2_grad 灰渐变窗底 / 3_dark 深色窗芯 /
+             4_dim 暗灰电路线 / 5_mid 中间调电路线。
+           开场 60 帧按「白线两侧擦入 → 铺满 → 转灰、黑窗芯显现 → 白线收走、装饰上线」叠放。 */
+        #st-hud .hud-win,
+        #st-hud .hud-lines,
+        #st-hud .hud-dark,
+        #st-hud .hud-dim,
+        #st-hud .hud-mid { left: 0; top: 790px; width: 1920px; height: 290px; }
+        #st-hud .hud-lines, #st-hud .hud-dark,
+        #st-hud .hud-dim, #st-hud .hud-mid { opacity: 0; }
+        /* 四层的透明度与擦除遮罩全由 sg-dialog.js 的 paintWindow(t) 逐帧写入，这里只给初始隐藏态。 */
         #st-hud .hud-deco  { left: 434px; top: 1022px; width: 1053px; height: 56px; opacity: 0; }
         #st-hud .hud-name  { top: 1014px; height: 59px; }
         /* 白闪层：擦入时领先底板半个身位，收尾淡掉，位置由脚本同步 */
@@ -717,7 +726,9 @@
         #st-loading {
             position: fixed; inset: 0; z-index: 9999;
             display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-            background: rgba(4, 10, 14, .94); transition: opacity .4s ease, visibility .4s ease;
+            background: rgba(4, 10, 14, .94);
+            /* 淡出要快：开场动画在 st-ready 的同一刻起跑，遮罩每多盖 0.1s，用户就少看 9% 的擦入 */
+            transition: opacity .18s ease, visibility .18s ease;
         }
         html.st-ready #st-loading { opacity: 0; visibility: hidden; pointer-events: none; }
         .st-load-kicker { font: 500 10px/1.6 ui-monospace, Consolas, monospace; letter-spacing: .3em; color: #63d6c4; }
@@ -767,8 +778,12 @@
     <!-- 对话框：MSGWIN 底色 / 电路线闪层 / 名牌装饰线 + 名牌底板 + 白闪层
          坐标全部照抄游戏（1920×1080），缩放交给 #st-hud 的 transform -->
     <div id="st-hud">
-        <div class="hud-ly hud-win" data-hud="win"><img src="ui/msgwin.webp" alt=""></div>
-        <div class="hud-ly hud-lines" data-hud="lines"><img src="ui/msgwin_lines.webp" alt=""></div>
+        <!-- 5 层同尺寸素材，从下到上：窗底渐变 / 深色窗芯 / 暗灰线 / 中间调线 / 白线闪层 -->
+        <div class="hud-ly hud-win" data-hud="win"><img src="ui/msgwin_2_grad.webp" alt=""></div>
+        <div class="hud-ly hud-dark" data-hud="dark"><img src="ui/msgwin_3_dark.webp" alt=""></div>
+        <div class="hud-ly hud-dim" data-hud="dim"><img src="ui/msgwin_4_dim.webp" alt=""></div>
+        <div class="hud-ly hud-mid" data-hud="mid"><img src="ui/msgwin_5_mid.webp" alt=""></div>
+        <div class="hud-ly hud-lines" data-hud="lines"><img src="ui/msgwin_1_lines.webp" alt=""></div>
         <div class="hud-ly hud-deco" data-hud="deco"></div>
         <div class="hud-ly hud-name-w" data-hud="name-white"><img src="ui/nameplate_l.webp" alt=""></div>
         <div class="hud-ly hud-name" data-hud="name"><img src="ui/nameplate_l.webp" alt=""></div>
