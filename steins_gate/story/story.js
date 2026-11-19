@@ -10,6 +10,10 @@
 //  编辑：左列表选行、右面板改字段，点「保存」写盘（PUT /api/story）。
 //        角色 / 背景 / 语音 / 动作全部由目录索引与 cast.json 生成下拉，
 //        手打的地方只剩正文与自建动作的 timeline 名。
+//        cast.json 不再是一个要去的页面：模型与语音目录在角色卡的「绑定」里改，
+//        默认名在「第 N 行 · 设默认」里改，动作宏在「自定义…」里「存为宏」长出来；
+//        左栏「剧本 / 角色表」两个页签，角色表用于全景核对、重命名与删除。
+//        只有一个「保存」，场景与 cast.json 一次写完。
 //
 //  场景字段：
 //    stage   [{ role, x, scale, z }]，可省略；x 为画布宽度比例（-1 左 / +1 右），
@@ -23,15 +27,16 @@
 //    name    这一句起对话框上显示的名字；省略＝沿用上一句，写空串＝回到角色默认名。
 //            用来做「？？？」，改它不动 role 与任何绑定（编辑面板「第 N 行 · 显示名」）
 //    voice   说话者的语音：cast[role].voiceDir 下的文件名，空/省略则不播
-//    action  说话者的动作：cast[role].actions 的键，或 { timeline, diffSlot1, ... }
+//    action  说话者的动作：cast[role].actions 的键，或动作对象
+//            { timeline, diffSlot1, diffSlot2 } —— 字段省略＝不动它，空串＝显式清空
 //    cues    同台其他角色各自的演出：{ 角色: { action, voice } }；同名条目优先于行级
-//            voice/action（说话者的也适用），编辑面板「本行演出」按角色逐行填写
-//    enter   本行登场的角色名或数组（编辑面板「登场阵容」点「登场」，不用手打）
+//            voice/action（说话者的也适用），编辑面板「登台角色」按角色逐卡填写
+//    enter   本行登场的角色名或数组（编辑面板「登台角色」卡上点「登场」，不用手打）
 //    exit    本行退场的角色名或数组
 //    move    本行站位调整 { 角色: x | { x, scale, z } }；省略则沿用上一句，
-//            写了就持续到下一次调整（编辑面板「站位」：第 1 行即全场默认，灰色数字是沿用值）
+//            写了就持续到下一次调整（编辑面板卡里第二排：第 1 行即全场默认，灰色数字是沿用值）
 //    wait    这一句在 AUTO 模式下额外停顿的毫秒（省略＝1200）；自动推进是否开启
-//            由对话框右下角的 AUTO 开关决定，不写在台词里（旧数据的 auto 字段已废弃，读取时忽略）
+//            由对话框上的 AUTO 开关决定，不写在台词里（旧数据的 auto 字段已废弃，读取时忽略）
 // ============================================================
 (function () {
     'use strict';
@@ -54,7 +59,9 @@
         // 多角色：actors[role] = { player, config, ... }；casting 由 scene.stage 决定
         // baseStage 是场景默认站位（只读基准），stage 是当前生效站位（会被行内 move 改写）
         actors: {}, baseStage: [], stage: [], layout: null, speaker: '', stageRaf: 0,
-        voiceSeq: 0            // 语音令牌：翻页/停播就 +1，解码晚到的旧语音据此丢弃
+        voiceSeq: 0,           // 语音令牌：翻页/停播就 +1，解码晚到的旧语音据此丢弃
+        // 角色表页签：当前选中的角色 / 宏；bindOpen 记哪些角色卡展开了「绑定」
+        castSel: '', castAct: null, bindOpen: {}, tab: 'script'
     };
     // 每个角色一台音频播放器：各自解码、各自驱动自己的口型，台词里的多人语音不会互相打断
     var audioPool = {};
@@ -487,7 +494,7 @@
             };
         }));
         state.models = groups.filter(function (g) { return g.models.length; });
-        if (state.mode === 'edit') renderCast();
+        if (state.mode === 'edit') renderDrawer();
     }
 
     /* ---------- 播放器 ---------- */
@@ -978,7 +985,7 @@
         el.value = value;
     }
 
-    function fillSelect(el, values, current, emptyLabel) {
+    function fillSelect(el, values, current, emptyLabel, labelFn) {
         el.innerHTML = '';
         if (emptyLabel) {
             var blank = document.createElement('option');
@@ -989,7 +996,7 @@
         (values || []).forEach(function (v) {
             var o = document.createElement('option');
             o.value = v;
-            o.textContent = v;
+            o.textContent = labelFn ? labelFn(v) : v;
             el.appendChild(o);
         });
         var want = current || '';
@@ -1022,7 +1029,11 @@
                 + '<button type="button" data-op="del" title="删除">✕</button>'
                 + '</span>';
             li.querySelector('.st-line-idx').textContent = String(i + 1);
-            li.querySelector('.st-line-role').textContent = line.role || '旁白';
+            li.querySelector('.st-line-role').textContent = line.role ? castName(line.role) : '旁白';
+            li.querySelector('.st-line-role').title = line.role
+                ? (castName(line.role) === line.role ? line.role
+                    : castName(line.role) + '（' + line.role + '，cast 里的键名）')
+                : '没有 role 字段的行按旁白处理';
             // 上/下场用小标标出来，比塞在正文前更好扫
             var flags = li.querySelector('.st-line-flags');
             [].concat(line.enter || []).forEach(function (r) {
@@ -1103,8 +1114,6 @@
         var box = $('st-stage-list');
         if (!box) return;
         var line = lines()[state.sel];
-        var idx = $('st-flag-idx');
-        if (idx) idx.textContent = String(state.sel + 1);
         box.innerHTML = '';
         var roles = castRoles();
         var eff = effectiveStage();
@@ -1141,7 +1150,7 @@
         roleSel.className = 'st-stage-role';
         roles.forEach(function (r) {
             var o = document.createElement('option');
-            o.value = r; o.textContent = r;
+            o.value = r; o.textContent = roleLabel(r);
             roleSel.appendChild(o);
         });
         roleSel.value = role;
@@ -1272,41 +1281,143 @@
         actRow.appendChild(voiceSel);
         card.appendChild(actRow);
 
-        // 对象动作：就地编辑 timeline / 差分
+        // 对象动作：就地编辑 主时间线 / 差分槽 1 / 差分槽 2，三个都是下拉，随时能改选
         if (cue.action && typeof cue.action === 'object') {
             var custom = document.createElement('div');
             custom.className = 'st-cue-custom';
 
-            var tl = document.createElement('input');
-            tl.type = 'text';
-            tl.dataset.key = 'timeline';
-            tl.setAttribute('list', 'st-tl-list');
-            tl.placeholder = 'timeline 标签';
-            var labels = (playerOf(role) && playerOf(role).mainTimelineLabels) || [];
-            if (cue.action.timeline && labels.length && labels.indexOf(cue.action.timeline) < 0) {
-                tl.classList.add('is-missing');
-                tl.title = '当前模型没有这个标签';
+            var mains = timelineOptionsFor(role);
+            var tlSel = mkLabelSelect('timeline', '主时间线', mains, cue.action.timeline, '（不改）');
+            if (cue.action.timeline && mains.indexOf(cue.action.timeline) < 0) {
+                tlSel.classList.add('is-missing');
+                tlSel.title = '当前模型没有这个标签';
             }
-            tl.value = cue.action.timeline || '';
-            custom.appendChild(cueField('时间线', tl));
+            custom.appendChild(cueField('主时间线', tlSel));
 
-            var diffSel = document.createElement('select');
-            diffSel.dataset.key = 'diff';
-            addOption(diffSel, '', '（无）');
-            diffOptionsFor(role).forEach(function (d) { addOption(diffSel, d, d); });
-            diffSel.value = cue.action.diffSlot1 || '';
-            custom.appendChild(cueField('差分', diffSel));
+            var diffs = diffOptionsFor(role);
+            custom.appendChild(cueField('差分槽 1',
+                mkLabelSelect('diff1', '差分槽 1', diffs, cue.action.diffSlot1)));
+            custom.appendChild(cueField('差分槽 2',
+                mkLabelSelect('diff2', '差分槽 2', diffs, cue.action.diffSlot2)));
 
+            var saveRow = document.createElement('div');
+            saveRow.className = 'st-macro-save';
             var macro = document.createElement('input');
             macro.type = 'text';
-            macro.dataset.key = 'macro';
-            macro.placeholder = '存为宏：填名字后离开';
-            custom.appendChild(cueField('宏名', macro));
+            macro.dataset.key = 'macro-name';
+            macro.placeholder = '给这套动作起个名字';
+            var saveBtn = document.createElement('button');
+            saveBtn.type = 'button';
+            saveBtn.dataset.macroSave = '1';
+            saveBtn.textContent = '存为宏';
+            saveBtn.title = '把上面这套 timeline / 差分存成这个角色的动作宏，之后下拉里直接选';
+            saveRow.appendChild(macro);
+            saveRow.appendChild(saveBtn);
+            custom.appendChild(saveRow);
 
             card.appendChild(custom);
         }
 
+        /* ④ 绑定：模型 / 语音目录。默认收成一行摘要，点开才展开——
+              这两项是「这个角色用哪套皮、声音在哪」，属于角色本身，就近放在角色卡上 */
+        var bindRow = document.createElement('div');
+        bindRow.className = 'st-actor-row st-actor-bind';
+        var bindOpen = !!state.bindOpen[role];
+
+        var bindBtn = document.createElement('button');
+        bindBtn.type = 'button';
+        bindBtn.className = 'st-bind-toggle' + (bindOpen ? ' is-open' : '') + (item && item.model ? '' : ' is-warn');
+        bindBtn.dataset.bind = '1';
+        bindBtn.title = '这个角色用哪套模型、语音放在哪（保存后刷新生效）';
+        var bindVal = document.createElement('span');
+        bindVal.className = 'st-bind-val';
+        bindVal.textContent = (item && item.model) ? modelShort(item.model) : '未绑模型';
+        var bindCaret = document.createElement('span');
+        bindCaret.className = 'st-bind-caret';
+        bindCaret.textContent = bindOpen ? '▾' : '▸';
+        bindBtn.appendChild(document.createTextNode('绑定'));
+        bindBtn.appendChild(bindVal);
+        bindBtn.appendChild(bindCaret);
+        bindRow.appendChild(bindBtn);
+        card.appendChild(bindRow);
+
+        var bindBody = document.createElement('div');
+        bindBody.className = 'st-bind-body' + (bindOpen ? ' is-open' : '');
+
+        var mRow = document.createElement('div');
+        mRow.className = 'st-actor-row';
+        var mLbl = document.createElement('span');
+        mLbl.className = 'lbl'; mLbl.textContent = '模型';
+        var mSel = document.createElement('select');
+        mSel.dataset.key = 'model';
+        mSel.title = 'character/data/ 下的「角色/文件」';
+        addOption(mSel, '', '（未绑定）');
+        (state.models || []).forEach(function (g) {
+            var og = document.createElement('optgroup');
+            og.label = g.folder;
+            g.models.forEach(function (m) {
+                var o = document.createElement('option');
+                o.value = m;
+                o.textContent = m.slice(g.folder.length + 1);
+                og.appendChild(o);
+            });
+            mSel.appendChild(og);
+        });
+        var curModel = (item && item.model) || '';
+        mSel.value = curModel;
+        if (curModel && mSel.value !== curModel) addOption(mSel, curModel, curModel + '（缺失）'), mSel.value = curModel;
+        mRow.appendChild(mLbl); mRow.appendChild(mSel);
+        bindBody.appendChild(mRow);
+
+        var vRow = document.createElement('div');
+        vRow.className = 'st-actor-row';
+        var vLbl = document.createElement('span');
+        vLbl.className = 'lbl'; vLbl.textContent = '语音';
+        var vInput = document.createElement('input');
+        vInput.type = 'text';
+        vInput.dataset.key = 'voiceDir';
+        vInput.value = (item && item.voiceDir) || '';
+        vInput.placeholder = '../../character/sounds/krs/';
+        vInput.title = '相对 /story/ 的语音目录；留空＝按默认规则找';
+        vRow.appendChild(vLbl); vRow.appendChild(vInput);
+        bindBody.appendChild(vRow);
+
+        var bindNote = document.createElement('div');
+        bindNote.className = 'st-bind-note';
+        var vCount = (item && item.voiceDir && state.voices[item.voiceDir]) ? state.voices[item.voiceDir].length : null;
+        bindNote.textContent = (item && item.model)
+            ? (vCount != null ? '该目录下 ' + vCount + ' 个音频' : '改模型后需保存并刷新页面')
+            : '还没绑模型，这个角色不会出现在登场阵容里';
+        bindBody.appendChild(bindNote);
+
+        card.appendChild(bindBody);
+
         return card;
+    }
+
+    /* 模型文件名很长，摘要里只留最后一段并掐掉扩展名 */
+    function modelShort(m) {
+        var seg = String(m).split('/').pop();
+        var cut = seg.indexOf('.psb');
+        return cut > 0 ? seg.slice(0, cut) : seg.replace(/\.zip$/i, '');
+    }
+
+    /* 下拉的通用构造：空值＝不改，其余是模型自带标签；当前值不在清单里时补一条「缺失」，
+       否则手动改过的值会被静默清掉。 */
+    function mkSelect(key, labels, current, emptyText) {
+        var sel = document.createElement('select');
+        sel.dataset.key = key;
+        addOption(sel, '', emptyText || '（无）');
+        labels.forEach(function (l) { addOption(sel, l, l); });
+        var v = current || '';
+        if (v && labels.indexOf(v) < 0) addOption(sel, v, v + '（缺失）');
+        sel.value = v;
+        return sel;
+    }
+    function mkLabelSelect(key, title, labels, current, emptyText) {
+        var sel = mkSelect(key, labels, current, emptyText);
+        sel.title = title;
+        return sel;
     }
 
     /* 到当前行为止的生效站位：base 叠加 0..sel 行的 move，用来显示「沿用」的值 */
@@ -1376,77 +1487,411 @@
         markStale();
     }
 
-    function renderCast() {
-        var box = $('st-cast-list');
+    // ============================================================
+    //  角色表页签（cast.json）
+    //  它不是「另一个页面」——叠在剧本上，剧本列表左侧仍可见可点。
+    //  日常的模型 / 默认名 / 动作宏都在角色卡与「第 N 行」里就地完成；
+    //  这里只做全景核对、重命名与删除。改动直接进 state.cast，
+    //  和剧本共用顶栏那一枚「保存」（saveCurrent 会把两个文件一起写盘）。
+    // ============================================================
+
+    /* 角色表的键：包含所有条目（连没绑模型的），但排除说明字段 doc */
+    function castKeys() {
+        return Object.keys(state.cast || {}).filter(function (k) { return k !== 'doc'; });
+    }
+
+    /* 两个页签：剧本 / 角色表。切页只改显示，不重建剧本列表，
+       所以「去角色表改完再回来」仍然停在原来那一行。 */
+    function setTab(tab) {
+        if (tab === 'cast' && !state.cast) return;
+        state.tab = (tab === 'cast') ? 'cast' : 'script';
+        $('st-editor').dataset.tab = state.tab;
+        $('st-view-script').hidden = (state.tab !== 'script');
+        $('st-view-cast').hidden = (state.tab !== 'cast');
+        [].forEach.call(document.querySelectorAll('.st-tab'), function (b) {
+            b.classList.toggle('is-on', b.dataset.tab === state.tab);
+        });
+        if (state.tab === 'cast') {
+            // 默认选中当前行的说话者（没有就选第一个），省掉「进来还要再点一下」
+            if (castKeys().indexOf(state.castSel) < 0) {
+                var keys = castKeys();
+                var spk = speakerOf(lines()[state.sel] || {});
+                state.castSel = keys.indexOf(spk) >= 0 ? spk : (keys[0] || '');
+            }
+            state.castAct = null;
+            renderDrawer();
+        } else {
+            $('st-cast-role-new').hidden = true;
+            $('st-cast-act-new').hidden = true;
+        }
+    }
+
+    function castTabOn() {
+        return state.tab === 'cast';
+    }
+
+    function renderDrawer() {
+        if (!castTabOn()) return;
+        renderCastRoleList();
+        renderCastActList();
+        renderCastFields();
+    }
+
+    /* ---- 左列：角色列表 ---- */
+    function renderCastRoleList() {
+        var box = $('st-cast-role-list');
         box.innerHTML = '';
-        var roles = Object.keys(state.cast || {}).filter(function (k) { return k !== 'doc'; });
-        if (!roles.length) {
-            box.textContent = 'cast.json 为空';
+        var keys = castKeys();
+        if (!keys.length) {
+            box.appendChild(edEmpty('还没有角色，点上方「＋」新增。'));
             return;
         }
-        roles.forEach(function (role) {
+        keys.forEach(function (role) {
             var item = state.cast[role] || {};
-            var cur = item.model || '';
-            var label = document.createElement('label');
-            label.className = 'st-field';
-            var cap = document.createElement('span');
-            cap.textContent = role;
+            var row = document.createElement('div');
+            row.className = 'st-cast-item' + (role === state.castSel ? ' is-sel' : '');
+            row.dataset.role = role;
 
-            var sel = document.createElement('select');
-            var blank = document.createElement('option');
-            blank.value = '';
-            blank.textContent = '（未绑定）';
-            sel.appendChild(blank);
-            (state.models || []).forEach(function (g) {
-                var og = document.createElement('optgroup');
-                og.label = g.folder;
-                g.models.forEach(function (m) {
-                    var o = document.createElement('option');
-                    o.value = m;
-                    o.textContent = m.slice(g.folder.length + 1);
-                    og.appendChild(o);
-                });
-                sel.appendChild(og);
-            });
-            sel.value = cur;
-            if (cur && sel.value !== cur) {
-                var miss = document.createElement('option');
-                miss.value = cur;
-                miss.textContent = cur + '（缺失）';
-                sel.appendChild(miss);
-                sel.value = cur;
-            }
-            sel.addEventListener('change', function () {
-                if (this.value) state.cast[role].model = this.value;
-                else delete state.cast[role].model;
-                markStale();
-            });
+            var name = document.createElement('span');
+            name.className = 'st-cast-item-name';
+            name.textContent = role + (item.model ? '' : ' · 未绑模型');
+            name.title = role + (item.model ? '' : '（未绑定模型，不会出现在登场阵容）');
+            row.appendChild(name);
 
-            // 显示名：角色键名是内部 id，这里才是对话框上给玩家看的默认名字
-            var nameInput = document.createElement('input');
-            nameInput.type = 'text';
-            nameInput.className = 'st-cast-name';
-            nameInput.value = (typeof item.name === 'string' ? item.name : '');
-            nameInput.placeholder = '显示名：' + role;
-            nameInput.title = '对话框上的默认称呼，留空＝用角色名「' + role + '」。剧本行里写显示名会覆盖它。';
-            nameInput.addEventListener('input', function () {
-                var v = this.value.trim();
-                if (v) state.cast[role].name = v;
-                else delete state.cast[role].name;
-                markStale();
-            });
-            // 失焦后再刷新依赖它的地方（本行 placeholder、行列表小标），输入时不抖动
-            nameInput.addEventListener('change', function () {
-                renderList();
-                renderProps();
-            });
-
-            label.appendChild(cap);
-            label.appendChild(sel);
-            label.appendChild(nameInput);
-            box.appendChild(label);
+            var ops = document.createElement('span');
+            ops.className = 'st-cast-item-ops';
+            var del = document.createElement('button');
+            del.type = 'button'; del.dataset.op = 'del'; del.textContent = '×';
+            del.title = '删除角色 ' + role + '（剧本里引用它的行会一起清掉相关字段，无法撤销）';
+            ops.appendChild(del);
+            row.appendChild(ops);
+            box.appendChild(row);
         });
     }
+
+    /* 第 2 栏：当前角色的动作宏。名字旁边直接给出主时间线，
+       不必逐个点开才知道「这个名字到底播什么」。 */
+    function renderCastActList() {
+        var box = $('st-cast-act-list');
+        if (!box) return;
+        box.innerHTML = '';
+        var add = $('st-cast-act-add');
+        var role = state.castSel;
+        if (add) {
+            var enabled = !!role;
+            add.disabled = !enabled;
+            add.style.opacity = enabled ? '1' : '.4';
+        }
+        if (!role) { box.appendChild(edEmpty('先在左边选一个角色。')); return; }
+        var acts = (state.cast[role] && state.cast[role].actions) || {};
+        var names = Object.keys(acts);
+        if (!names.length) {
+            box.appendChild(edEmpty('还没有动作宏。在角色卡里「自定义…」调好后点「存为宏」，宏就长在这里。'));
+            return;
+        }
+        names.forEach(function (n) {
+            var a = acts[n] || {};
+            var row = document.createElement('div');
+            row.className = 'st-cast-item' + (n === state.castAct ? ' is-sel' : '');
+            row.dataset.act = n;
+
+            var nm = document.createElement('span');
+            nm.className = 'st-cast-item-name';
+            nm.textContent = n;
+            row.appendChild(nm);
+
+            var meta = document.createElement('span');
+            meta.className = 'st-cast-item-meta';
+            meta.textContent = a.timeline || '（无）';
+            meta.title = [a.timeline, a.diffSlot1, a.diffSlot2].filter(Boolean).join(' · ') || '没有填时间线';
+            row.appendChild(meta);
+
+            var ops = document.createElement('span');
+            ops.className = 'st-cast-item-ops';
+            var del = document.createElement('button');
+            del.type = 'button'; del.dataset.op = 'del'; del.textContent = '×';
+            del.title = '删除动作宏 ' + n;
+            ops.appendChild(del);
+            row.appendChild(ops);
+            box.appendChild(row);
+        });
+    }
+
+    function edEmpty(text) {
+        var d = document.createElement('div');
+        d.className = 'st-cast-empty';
+        d.textContent = text;
+        return d;
+    }
+
+    /* ---- 第 3 栏：属性（选中角色 → 角色属性；选中宏 → 宏属性）---- */
+    function renderCastFields() {
+        var box = $('st-cast-fields');
+        box.innerHTML = '';
+        var role = state.castSel;
+        if (!role) {
+            box.appendChild(edEmpty('选中角色后，在这里核对模型、语音目录与动作宏。'));
+            return;
+        }
+        var wrap = document.createElement('div');
+        wrap.className = 'st-cast-fields-inner';
+        box.appendChild(wrap);
+
+        if (state.castAct == null) renderCastRoleFields(wrap, role);
+        else renderCastActFields(wrap, role, state.castAct);
+    }
+
+    /* 角色属性：显示名 / 模型 / 语音目录 */
+    function renderCastRoleFields(wrap, role) {
+        var item = state.cast[role] || {};
+        var crumb = document.createElement('div');
+        crumb.className = 'st-cast-breadcrumb';
+        crumb.innerHTML = '角色 · <b></b>';
+        crumb.querySelector('b').textContent = role;
+        wrap.appendChild(crumb);
+
+        // 角色键名（内部 id）可直接改，剧本引用同步迁移
+        wrap.appendChild(edField('角色 id（剧本按此名引用）', edInput('text', role, 'cast-key', '改名会同步更新所有剧本引用')));
+
+        var nameRow = document.createElement('label');
+        nameRow.className = 'st-field';
+        nameRow.appendChild(edSpan('显示名'));
+        var name = edInput('text', (typeof item.name === 'string' ? item.name : ''), 'name', '留空＝用角色 id 当显示名');
+        nameRow.appendChild(name);
+        wrap.appendChild(nameRow);
+
+        // 模型下拉（与 renderCast 同源的目录索引）
+        var modelLabel = document.createElement('label');
+        modelLabel.className = 'st-field';
+        modelLabel.appendChild(edSpan('模型（character/data/ 下的「角色/文件」）'));
+        var sel = document.createElement('select');
+        sel.dataset.key = 'model';
+        var blank = document.createElement('option');
+        blank.value = ''; blank.textContent = '（未绑定）';
+        sel.appendChild(blank);
+        (state.models || []).forEach(function (g) {
+            var og = document.createElement('optgroup');
+            og.label = g.folder;
+            g.models.forEach(function (m) {
+                var o = document.createElement('option');
+                o.value = m; o.textContent = m.slice(g.folder.length + 1);
+                og.appendChild(o);
+            });
+            sel.appendChild(og);
+        });
+        var cur = item.model || '';
+        sel.value = cur;
+        if (cur && sel.value !== cur) {
+            var miss = document.createElement('option');
+            miss.value = cur; miss.textContent = cur + '（缺失）';
+            sel.appendChild(miss); sel.value = cur;
+        }
+        modelLabel.appendChild(sel);
+        wrap.appendChild(modelLabel);
+
+        var voiceRow = document.createElement('label');
+        voiceRow.className = 'st-field';
+        voiceRow.appendChild(edSpan('语音目录（相对 /story/，如 ../../character/sounds/krs/）'));
+        voiceRow.appendChild(edInput('text', item.voiceDir || '', 'voiceDir', '留空＝用默认规则'));
+        wrap.appendChild(voiceRow);
+
+        wrap.appendChild(edHint('角色是剧本引用的内部 id；模型、语音目录、动作宏都绑在它下面。换造型只改「模型」即可，不用动剧本。'));
+    }
+
+    /* 动作宏属性：timeline / diffSlot1 / diffSlot2 / duration / variables[]
+       就地展开在所选那一行下面，所以不再需要面包屑。 */
+    function renderCastActFields(wrap, role, actName) {
+        var a = (((state.cast[role] || {}).actions || {})[actName]) || {};
+
+        // 动作宏名（可改，剧本里引用同步迁移）
+        wrap.appendChild(edField('宏名（剧本 action 字段引用）', edInput('text', actName, 'act-key', '改名会同步更新剧本引用')));
+
+        var mains = timelineOptionsFor(role);
+        var diffs = diffOptionsFor(role);
+        wrap.appendChild(edSelectField('主时间线 timeline', 'timeline', a.timeline || '', mains));
+        wrap.appendChild(edSelectField('差分槽 1 diffSlot1', 'diffSlot1', a.diffSlot1 || '', diffs));
+        wrap.appendChild(edSelectField('差分槽 2 diffSlot2', 'diffSlot2', a.diffSlot2 || '', diffs));
+
+        var durRow = document.createElement('label');
+        durRow.className = 'st-field';
+        durRow.appendChild(edSpan('保持时长 duration（ms，留空＝默认）'));
+        durRow.appendChild(edInput('number', a.duration != null ? String(a.duration) : '', 'duration', '1000'));
+        wrap.appendChild(durRow);
+
+        // ---- variables[] ----
+        var vHead = document.createElement('div');
+        vHead.className = 'st-sub';
+        vHead.innerHTML = '<h4>变量 variables</h4>';
+        var vOps = document.createElement('div');
+        vOps.style.cssText = 'display:flex;gap:6px';
+        var vAdd = document.createElement('button');
+        vAdd.type = 'button'; vAdd.id = 'st-cast-var-add';
+        vAdd.className = 'st-var-tool';
+        vAdd.textContent = '＋ 添加变量';
+        vOps.appendChild(vAdd);
+        var vPaste = document.createElement('button');
+        vPaste.type = 'button'; vPaste.id = 'st-cast-var-paste';
+        vPaste.className = 'st-var-tool';
+        vPaste.textContent = '粘贴导入';
+        vPaste.title = '粘贴 stage 控制台「复制参数」得到的 JSON，批量追加为变量';
+        vOps.appendChild(vPaste);
+        vHead.appendChild(vOps);
+        wrap.appendChild(vHead);
+
+        var colHead = document.createElement('div');
+        colHead.className = 'st-var-head';
+        ['变量名', '值', '时长', '延迟'].forEach(function (t) {
+            var s = document.createElement('span'); s.textContent = t; colHead.appendChild(s);
+        });
+        var pad = document.createElement('span'); colHead.appendChild(pad);
+        wrap.appendChild(colHead);
+
+        var varBox = document.createElement('div');
+        varBox.id = 'st-cast-var-list';
+        wrap.appendChild(varBox);
+        renderCastVars(varBox, role, a.variables || []);
+
+        // 粘贴导入面板（默认隐藏），直接吃 stage「复制参数」导出的 JSON
+        var pastePanel = document.createElement('div');
+        pastePanel.className = 'st-var-paste';
+        pastePanel.id = 'st-cast-var-paste-panel';
+        pastePanel.hidden = true;
+        var pasteTip = document.createElement('div');
+        pasteTip.className = 'st-var-paste-tip';
+        pasteTip.textContent = '粘贴 stage「复制参数」的 JSON 数组，点「导入」追加到下方变量（Ctrl+Enter 快速导入）。';
+        pastePanel.appendChild(pasteTip);
+        var pasteText = document.createElement('textarea');
+        pasteText.id = 'st-cast-var-paste-text';
+        pasteText.rows = 5;
+        pasteText.spellcheck = false;
+        pasteText.placeholder = '[{"name":"fade_eyebrow_type_a","value":24,"duration":0}, ...]';
+        pastePanel.appendChild(pasteText);
+        var pasteOps = document.createElement('div');
+        pasteOps.className = 'st-var-paste-ops';
+        var pasteDo = document.createElement('button');
+        pasteDo.type = 'button'; pasteDo.dataset.op = 'paste-do'; pasteDo.textContent = '导入';
+        var pasteCancel = document.createElement('button');
+        pasteCancel.type = 'button'; pasteCancel.dataset.op = 'paste-cancel'; pasteCancel.textContent = '取消';
+        pasteOps.appendChild(pasteDo); pasteOps.appendChild(pasteCancel);
+        var pasteMsg = document.createElement('span');
+        pasteMsg.className = 'st-var-paste-tip';
+        pasteMsg.id = 'st-cast-var-paste-msg';
+        pasteOps.appendChild(pasteMsg);
+        pastePanel.appendChild(pasteOps);
+        wrap.appendChild(pastePanel);
+
+        var varNames = (playerOf(role) && playerOf(role).variableList || [])
+            .map(function (v) { return v.label || v.name || v; });
+        var dl = document.createElement('datalist');
+        dl.id = 'st-cast-var-names';
+        varNames.forEach(function (n) {
+            var o = document.createElement('option'); o.value = n; dl.appendChild(o);
+        });
+        wrap.appendChild(dl);
+
+        wrap.appendChild(edHint('变量名可从模型自带列表里选，也能直接输入。值 / 时长 / 延迟单位分别为 数值 / ms / ms。stage 控制台「变量微调」里调好后点「复制参数」，回到这里点「粘贴导入」即可批量导入。'));
+    }
+
+    function renderCastVars(box, role, vars) {
+        box.innerHTML = '';
+        vars.forEach(function (v, i) {
+            var row = document.createElement('div');
+            row.className = 'st-var-row';
+            row.dataset.i = String(i);
+            var name = document.createElement('input');
+            name.className = 'v-name'; name.dataset.k = 'name';
+            name.value = v.name || ''; name.setAttribute('list', 'st-cast-var-names');
+            name.placeholder = '变量名'; name.title = v.name || '变量名';
+            row.appendChild(name);
+            var value = document.createElement('input');
+            value.className = 'v-num'; value.type = 'number'; value.dataset.k = 'value';
+            value.value = (v.value != null ? String(v.value) : '0'); value.title = '值';
+            row.appendChild(value);
+            var dur = document.createElement('input');
+            dur.className = 'v-num'; dur.type = 'number'; dur.dataset.k = 'duration';
+            dur.value = (v.duration != null ? String(v.duration) : '0'); dur.title = '时长 ms';
+            row.appendChild(dur);
+            var delay = document.createElement('input');
+            delay.className = 'v-num'; delay.type = 'number'; delay.dataset.k = 'delay';
+            delay.value = (v.delay != null ? String(v.delay) : '0'); delay.title = '延迟 ms';
+            row.appendChild(delay);
+            var del = document.createElement('button');
+            del.type = 'button'; del.dataset.op = 'del-var'; del.textContent = '×';
+            del.title = '删除这个变量';
+            row.appendChild(del);
+            box.appendChild(row);
+        });
+        if (!vars.length) box.appendChild(edEmpty('还没有变量，点上方「＋ 添加变量」。'));
+    }
+
+    /* 解析从 stage「复制参数」粘贴来的变量 JSON。
+       标准 [{name,value,duration,delay}, ...] 直接可用；
+       也容错用户示例里的 [{ {...}, {...} }] 这类多余包裹——
+       统一用正则抠出每个最内层 {...} 对象逐个解析，跳过非法项。 */
+    function parsePastedVars(text) {
+        var out = [], m, re = /\{[^{}]*\}/g;
+        if (!text || !text.trim()) return out;
+        while ((m = re.exec(text)) !== null) {
+            var obj;
+            try { obj = JSON.parse(m[0]); } catch (e) { continue; }
+            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
+            var name = obj.name != null ? String(obj.name).trim() : '';
+            if (!name) continue;
+            var val = Number(obj.value);
+            var dur = Number(obj.duration);
+            var dly = Number(obj.delay);
+            out.push({
+                name: name,
+                value: isFinite(val) ? val : 0,
+                duration: isFinite(dur) ? dur : 0,
+                delay: isFinite(dly) ? dly : 0
+            });
+        }
+        return out;
+    }
+
+    function edSpan(text) {
+        var s = document.createElement('span'); s.textContent = text; return s;
+    }
+    function edInput(type, value, key, placeholder) {
+        var i = document.createElement('input');
+        i.type = type; i.dataset.key = key; i.value = value;
+        if (placeholder != null) i.placeholder = placeholder;
+        return i;
+    }
+    function edField(label, input) {
+        var l = document.createElement('label');
+        l.className = 'st-field';
+        l.appendChild(edSpan(label));
+        l.appendChild(input);
+        return l;
+    }
+    /* 下拉字段：空值＝不改，候选是该角色模型的标签。
+       为什么不是 input + datalist：datalist 会拿输入框里的现有文本去过滤候选，
+       一旦有过值，展开就只剩那一个匹配项，选不了别的（必须手动清空才行）。
+       换成 select 后任何时候都能重新选，选完也不重绘输入框。 */
+    function edSelectField(label, key, value, options, emptyText) {
+        var l = document.createElement('label');
+        l.className = 'st-field';
+        l.appendChild(edSpan(label));
+        l.appendChild(mkSelect(key, options || [], value || '', emptyText || '（不改）'));
+        return l;
+    }
+    function edHint(text) {
+        var p = document.createElement('div');
+        p.className = 'st-cast-hint'; p.textContent = text;
+        return p;
+    }
+
+    /* 当前选中的动作对象引用 */
+    function selCastAct() {
+        if (!state.castSel || state.castAct == null) return null;
+        var item = state.cast[state.castSel];
+        if (!item || !item.actions) return null;
+        return item.actions[state.castAct] || null;
+    }
+
+    /* 角色表没有自己的「保存」：改动落在 state.cast，顶栏那一枚保存会连剧本一起写盘 */
 
     function macroOptions(role) {
         var acts = (state.cast && state.cast[role] && state.cast[role].actions) || {};
@@ -1460,10 +1905,22 @@
         sel.appendChild(o);
     }
 
-    /* 某个角色的模型能用的差分清单（自定义动作的 diffSlot1） */
+    /* 某个角色的模型能用的差分清单（两个差分槽共用这一份） */
     function diffOptionsFor(role) {
         var p = playerOf(role);
         return (p && p.diffTimelineLabels) ? p.diffTimelineLabels.slice() : [];
+    }
+
+    /* 某个角色的模型能用的主时间线清单 */
+    function timelineOptionsFor(role) {
+        var p = playerOf(role);
+        return (p && p.mainTimelineLabels) ? p.mainTimelineLabels.slice() : [];
+    }
+
+    /* 下拉里怎么显示一个角色：有自定义显示名时带上内部 id，两个重名也分得开 */
+    function roleLabel(role) {
+        var n = castName(role);
+        return n === role ? role : n + '（' + role + '）';
     }
 
     function cueField(label, control) {
@@ -1491,7 +1948,8 @@
             return;
         }
         var role = speakerOf(line);
-        fillSelect($('st-role'), Object.keys(state.cast || {}).filter(function (k) { return k !== 'doc'; }), role, '');
+        fillSelect($('st-role'), Object.keys(state.cast || {}).filter(function (k) { return k !== 'doc'; }),
+            role, '', roleLabel);
         setVal($('st-line-text'), line.text || '');
         renderNameField(line);
 
@@ -1505,12 +1963,14 @@
     function renderNameField(line) {
         var field = $('st-display-name');
         var btn = $('st-name-default');
+        var mk = $('st-name-makedefault');
         if (!field) return;
         if (!line) {
             field.value = '';
             field.placeholder = '';
             field.disabled = true;
             if (btn) btn.disabled = true;
+            if (mk) mk.disabled = true;
             return;
         }
         var role = speakerOf(line);
@@ -1523,12 +1983,20 @@
             btn.disabled = false;
             btn.title = '填入角色本名「' + castName(role) + '」（用来揭示真名）';
         }
+        if (mk) {
+            // 只有填了名字、且和当前默认名不同时才有意义
+            var v = own.trim();
+            mk.disabled = !v || v === castName(role);
+            mk.title = v
+                ? '把「' + v + '」写成「' + role + '」的默认名，之后所有没单独改过的行都显示它'
+                : '先在左边填一个名字';
+        }
     }
 
     function renderEditor() {
         renderList();
         renderProps();      // 里面会画角色卡
-        renderCast();
+        renderDrawer();
         // 选中哪一句，画布就预览哪一句的站位与上下场
         if (state.mode === 'edit') rebuildStaging(state.sel);
     }
@@ -1788,6 +2256,7 @@
             else delete line.name;
             markStale();
             renderList();
+            renderNameField(line);   // 「设默认」的可用状态跟着输入走
         });
         $('st-name-default').addEventListener('click', function () {
             var line = lines()[state.sel];
@@ -1798,8 +2267,23 @@
             renderNameField(line);
             renderList();
         });
+        // 设默认：把这一行的称呼写成角色的默认名（写 cast，不动这一行的 line.name）
+        $('st-name-makedefault').addEventListener('click', function () {
+            var line = lines()[state.sel];
+            if (!line) return;
+            var role = speakerOf(line);
+            var v = (typeof line.name === 'string' ? line.name : '').trim();
+            if (!v) return;
+            var item = state.cast[role] || (state.cast[role] = {});
+            item.name = v;
+            markStale();
+            renderList();
+            renderProps();          // 说话者下拉、角色卡下拉里的「助手（红莉栖）」
+            renderDrawer();
+            msg('「' + role + '」的默认名已设为「' + v + '」');
+        });
         /* 角色卡里的「本行」是动态生成的，用容器上的事件委托。
-           data-key=action/voice/diff 是下拉，timeline 是输入，macro 是存为宏。 */
+           data-key=action/voice/timeline/diff1/diff2 全是下拉，macro 是输入。 */
         $('st-stage-list').addEventListener('change', function (evt) {
             var el = evt.target;
             var card = el.closest && el.closest('.st-stage-row');
@@ -1811,17 +2295,12 @@
 
             if (key === 'action') {
                 if (el.value === '__custom__') {
-                    setCue(line, role, 'action', { timeline: '', diffSlot1: '' });
+                    setCue(line, role, 'action', { timeline: '' });
                 } else {
                     setCue(line, role, 'action', el.value);
                 }
                 markStale();
                 renderProps();
-                if (el.value === '__custom__') {
-                    var focus = document.querySelector('#st-stage-list .st-stage-row[data-role="' + role
-                        + '"] input[data-key="timeline"]');
-                    if (focus) focus.focus();
-                }
                 return;
             }
             if (key === 'voice') {
@@ -1829,36 +2308,37 @@
                 markStale();
                 return;
             }
+            // 绑定（第四排）：模型与语音目录都只改 cast，剧本一行都不用动
+            if (key === 'model') {
+                var ci = state.cast[role] || (state.cast[role] = {});
+                if (el.value) ci.model = el.value; else delete ci.model;
+                markStale();
+                renderRoster();
+                renderDrawer();
+                var k2 = castingKey(stageOf(state.scene, state.cast), state.cast);
+                if (k2 !== state.model) msg('模型已改：保存后刷新页面生效');
+                return;
+            }
+            if (key === 'voiceDir') {
+                var vi = state.cast[role] || (state.cast[role] = {});
+                var vd = el.value.trim();
+                if (vd) vi.voiceDir = vd; else delete vi.voiceDir;
+                if (vd && !state.voices[vd]) loadVoices(role);
+                markStale();
+                renderRoster();
+                renderDrawer();
+                return;
+            }
             var act = cueOf(line, role).action;
             if (!act || typeof act !== 'object') return;
-            if (key === 'diff') {
-                act.diffSlot1 = el.value;
+            if (key === 'timeline' || key === 'diff1' || key === 'diff2') {
+                var field = key === 'timeline' ? 'timeline'
+                    : (key === 'diff1' ? 'diffSlot1' : 'diffSlot2');
+                // 空值也照写：显式清空和「没选过」在播放端是两件事
+                act[field] = el.value;
                 markStale();
                 return;
             }
-            if (key === 'macro') {
-                var name = el.value.trim();
-                if (!name) return;
-                var item = state.cast[role] || (state.cast[role] = { model: '' });
-                var acts = item.actions || (item.actions = {});
-                acts[name] = JSON.parse(JSON.stringify(act));
-                setCue(line, role, 'action', name);
-                markStale();
-                renderProps();
-                renderCast();
-            }
-        });
-        $('st-stage-list').addEventListener('input', function (evt) {
-            var el = evt.target;
-            if (!el.dataset || el.dataset.key !== 'timeline') return;
-            var card = el.closest && el.closest('.st-stage-row');
-            if (!card) return;
-            var line = lines()[state.sel];
-            if (!line) return;
-            var act = cueOf(line, card.dataset.role).action;
-            if (!act || typeof act !== 'object') return;
-            act.timeline = el.value;
-            markStale();
         });
         $('st-wait').addEventListener('input', function () {
             var line = lines()[state.sel];
@@ -1867,8 +2347,40 @@
             else line.wait = Math.max(0, Number(this.value) || 0);
             markStale();
         });
-        // 三态按钮是动态生成的，用容器上的事件委托（按钮就在#st-stage-list 的角色行里）
+        // 三态按钮 / 绑定展开 / 存为宏：都是动态生成的，用容器上的事件委托
         $('st-stage-list').addEventListener('click', function (evt) {
+            var bindBtn = evt.target.closest && evt.target.closest('button[data-bind]');
+            if (bindBtn) {
+                var bCard = bindBtn.closest('.st-stage-row');
+                var bRole = bCard && bCard.dataset.role;
+                if (bRole) {
+                    state.bindOpen[bRole] = !state.bindOpen[bRole];
+                    renderRoster();
+                }
+                return;
+            }
+            var saveBtn = evt.target.closest && evt.target.closest('button[data-macro-save]');
+            if (saveBtn) {
+                var sCard = saveBtn.closest('.st-stage-row');
+                var sRole = sCard && sCard.dataset.role;
+                var sLine = lines()[state.sel];
+                var sAct = sRole && cueOf(sLine || {}, sRole).action;
+                if (!sRole || !sAct || typeof sAct !== 'object') { msg('先在上面选好时间线，再存为宏'); return; }
+                var nameEl = sCard.querySelector('input[data-key="macro-name"]');
+                var nm = nameEl ? nameEl.value.trim() : '';
+                if (!nm) { if (nameEl) nameEl.focus(); msg('先给这套动作起个名字'); return; }
+                var cItem = state.cast[sRole] || (state.cast[sRole] = { model: '' });
+                var cActs = cItem.actions || (cItem.actions = {});
+                if (cActs[nm] && !window.confirm('动作宏「' + nm + '」已存在，覆盖？')) return;
+                cActs[nm] = { timeline: sAct.timeline || '', diffSlot1: sAct.diffSlot1 || '', diffSlot2: sAct.diffSlot2 || '' };
+                Object.keys(cActs[nm]).forEach(function (k) { if (!cActs[nm][k]) delete cActs[nm][k]; });
+                setCue(sLine, sRole, 'action', nm);
+                markStale();
+                renderProps();
+                renderDrawer();
+                msg('已存为宏「' + nm + '」，之后在动作下拉里直接选');
+                return;
+            }
             var btn = evt.target.closest && evt.target.closest('button[data-kind]');
             if (!btn) return;
             var line = lines()[state.sel];
@@ -1898,6 +2410,371 @@
             rebuildStaging(state.sel);
             renderRoster();
         });
+
+        bindCastEditor();
+    }
+
+    /* ---- cast.json 编辑器的事件（结构同 bindEditor，集中在一处） ---- */
+    function bindCastEditor() {
+        // 页签：剧本 / 角色表。Esc 从角色表退回剧本
+        [].forEach.call(document.querySelectorAll('.st-tab'), function (b) {
+            b.addEventListener('click', function () { setTab(b.dataset.tab); });
+        });
+        document.addEventListener('keydown', function (evt) {
+            if (evt.key === 'Escape' && castTabOn()) setTab('script');
+        });
+
+        /* 角色表整体一个委托：角色行、宏行、两个「新增」的内联输入都从这里走。
+           列表会随选中重绘，所以不能绑在行元素上。 */
+        $('st-view-cast').addEventListener('click', function (evt) {
+            var t = evt.target;
+            var roleRow = t.closest && t.closest('#st-cast-role-list .st-cast-item');
+            if (roleRow) {
+                var role = roleRow.dataset.role;
+                if (t.closest('button[data-op="del"]')) { delCastRole(role); return; }
+                state.castSel = role;
+                state.castAct = null;
+                renderDrawer();
+                return;
+            }
+            var actRow = t.closest && t.closest('#st-cast-act-list .st-cast-item');
+            if (actRow) {
+                var act = actRow.dataset.act;
+                if (t.closest('button[data-op="del"]')) { delCastAct(state.castSel, act); return; }
+                state.castAct = (state.castAct === act ? null : act);   // 再点一次回到角色属性
+                renderDrawer();
+                return;
+            }
+            if (t.closest && t.closest('#st-cast-role-add')) {
+                var nb = $('st-cast-role-new');
+                nb.hidden = !nb.hidden;
+                if (!nb.hidden) $('st-cast-role-new-name').focus();
+                return;
+            }
+            if (t.closest && t.closest('#st-cast-role-new-ok')) { createCastRole(); return; }
+            if (t.closest && t.closest('#st-cast-act-add')) {
+                var ab = $('st-cast-act-new');
+                if (!ab) return;
+                ab.hidden = !ab.hidden;
+                if (!ab.hidden) $('st-cast-act-new-name').focus();
+                return;
+            }
+            if (t.closest && t.closest('#st-cast-act-new-ok')) { createCastAct(); return; }
+        });
+        $('st-view-cast').addEventListener('keydown', function (evt) {
+            if (evt.key !== 'Enter' || !evt.target.id) return;
+            if (evt.target.id === 'st-cast-role-new-name') { evt.preventDefault(); createCastRole(); }
+            if (evt.target.id === 'st-cast-act-new-name') { evt.preventDefault(); createCastAct(); }
+        });
+
+        // 属性区：输入 / 变更
+        $('st-cast-fields').addEventListener('change', onCastFieldChange);
+        $('st-cast-fields').addEventListener('input', onCastFieldInput);
+        $('st-cast-fields').addEventListener('click', onCastFieldClick);
+    }
+
+    /* 新增角色：只填内部 id，显示名与模型在右边属性区接着填 */
+    function createCastRole() {
+        var input = $('st-cast-role-new-name');
+        var name = (input.value || '').trim();
+        if (!name || name === 'doc') { msg('角色名无效'); return; }
+        if (state.cast[name]) { msg('角色「' + name + '」已存在'); return; }
+        state.cast[name] = { actions: {} };   // 先建角色，模型随后在右边挑
+        state.castSel = name;
+        state.castAct = null;
+        input.value = '';
+        $('st-cast-role-new').hidden = true;
+        markStale();
+        renderDrawer();
+        msg('已新增角色「' + name + '」，接着在右边绑模型');
+    }
+
+    function createCastAct() {
+        var role = state.castSel;
+        if (!role) return;
+        var input = $('st-cast-act-new-name');
+        if (!input) return;
+        var name = (input.value || '').trim();
+        if (!name) return;
+        var item = state.cast[role];
+        var acts = item.actions || (item.actions = {});
+        if (acts[name]) { msg('动作宏「' + name + '」已存在'); return; }
+        acts[name] = { timeline: '' };
+        state.castAct = name;
+        markStale();
+        $('st-cast-act-new').hidden = true;
+        renderDrawer();
+    }
+
+    /* 需要「失焦即同步」的文本类字段：角色 id / 宏名 / 变量名（改名要重绘列表） */
+    function onCastFieldChange(evt) {
+        var el = evt.target;
+        var key = el.dataset.key;
+        if (!key) return;
+        var role = state.castSel;
+        if (!role) return;
+
+        if (key === 'cast-key') {
+            renameCastRole(role, el.value.trim()); return;
+        }
+        if (key === 'act-key' && state.castAct != null) {
+            renameCastAct(role, state.castAct, el.value.trim()); return;
+        }
+        if (key === 'model') {
+            var item = state.cast[role];
+            if (el.value) item.model = el.value; else delete item.model;
+            markStale(); renderDrawer(); return;
+        }
+        if (key === 'diffSlot1' || key === 'diffSlot2' || key === 'timeline' || key === 'duration') {
+            var a = selCastAct();
+            if (!a) return;
+            if (key === 'duration') {
+                if (el.value === '') delete a.duration;
+                else a.duration = Math.max(0, Number(el.value) || 0);
+            } else {
+                if (el.value) a[key] = el.value; else delete a[key];
+            }
+            markStale();
+            // 左列宏名旁边挂着主时间线，改了要跟着变；属性区不重绘，下拉保持展开
+            renderCastActList();
+            return;
+        }
+    }
+
+    /* 即时生效、不需要重绘的文本字段 */
+    function onCastFieldInput(evt) {
+        var el = evt.target;
+        var key = el.dataset.key;
+        if (!key) return;
+        var role = state.castSel;
+        if (!role) return;
+        var item = state.cast[role];
+        if (key === 'name') {
+            var v = el.value.trim();
+            if (v) item.name = v; else delete item.name;
+            markStale();
+            // 只刷角色列与剧本行里的称呼；属性区不重绘，否则输入框每敲一个字就重建、光标丢失
+            renderCastRoleList(); renderList();
+        } else if (key === 'voiceDir') {
+            var d = el.value.trim();
+            if (d) item.voiceDir = d; else delete item.voiceDir;
+            markStale();
+        }
+    }
+
+    /* 变量行的增删 + 变量值输入 */
+    function onCastFieldClick(evt) {
+        var add = evt.target.closest && evt.target.closest('#st-cast-var-add');
+        if (add) {
+            var a = selCastAct();
+            if (!a) return;
+            var vars = a.variables || (a.variables = []);
+            vars.push({ name: '', value: 0, duration: 0, delay: 0 });
+            markStale();
+            renderCastVars($('st-cast-var-list'), state.castSel, vars);
+            return;
+        }
+        var del = evt.target.closest && evt.target.closest('button[data-op="del-var"]');
+        if (del) {
+            var a2 = selCastAct();
+            if (!a2 || !a2.variables) return;
+            var row = del.closest('.st-var-row');
+            a2.variables.splice(Number(row.dataset.i), 1);
+            if (!a2.variables.length) delete a2.variables;
+            markStale();
+            renderCastVars($('st-cast-var-list'), state.castSel, a2.variables || []);
+            return;
+        }
+        var pasteBtn = evt.target.closest && evt.target.closest('#st-cast-var-paste');
+        if (pasteBtn) {
+            var panel = $('st-cast-var-paste-panel');
+            if (!panel) return;
+            panel.hidden = !panel.hidden;
+            if (!panel.hidden) {
+                setPasteMsg('', '');
+                var ta = $('st-cast-var-paste-text');
+                if (ta) ta.focus();
+            }
+            return;
+        }
+        var doPaste = evt.target.closest && evt.target.closest('button[data-op="paste-do"]');
+        if (doPaste) { doPasteVars(); return; }
+        var cancel = evt.target.closest && evt.target.closest('button[data-op="paste-cancel"]');
+        if (cancel) {
+            var p = $('st-cast-var-paste-panel');
+            if (p) p.hidden = true;
+            var t = $('st-cast-var-paste-text');
+            if (t) t.value = '';
+            setPasteMsg('', '');
+            return;
+        }
+    }
+    function setPasteMsg(text, kind) {
+        var msg = $('st-cast-var-paste-msg');
+        if (!msg) return;
+        msg.textContent = text || '';
+        msg.className = 'st-var-paste-tip' + (kind ? ' is-' + kind : '');
+    }
+    function doPasteVars() {
+        var ta = $('st-cast-var-paste-text');
+        var a = selCastAct();
+        if (!ta || !a) return;
+        var parsed = parsePastedVars(ta.value);
+        if (!parsed.length) {
+            setPasteMsg('没解析出变量，请粘贴 [{name,value,duration}, ...] 格式的 JSON。', 'err');
+            return;
+        }
+        var vars = a.variables || (a.variables = []);
+        parsed.forEach(function (v) { vars.push(v); });
+        markStale();
+        renderCastVars($('st-cast-var-list'), state.castSel, vars);
+        ta.value = '';
+        setPasteMsg('已导入 ' + parsed.length + ' 个变量', 'ok');
+    }
+    document.addEventListener('keydown', function (evt) {
+        if (evt.target && evt.target.id === 'st-cast-var-paste-text' &&
+            (evt.ctrlKey || evt.metaKey) && evt.key === 'Enter') {
+            evt.preventDefault();
+            doPasteVars();
+        }
+    });
+    // 变量行的四个输入：委托在 fields 上，单独处理（dataset.k）
+    document.addEventListener('input', function (evt) {
+        var el = evt.target;
+        if (!el.dataset || el.dataset.k == null) return;
+        var row = el.closest && el.closest('.st-var-row');
+        if (!row) return;
+        var a = selCastAct();
+        if (!a || !a.variables) return;
+        var v = a.variables[Number(row.dataset.i)];
+        if (!v) return;
+        var k = el.dataset.k;
+        if (k === 'name') v.name = el.value;
+        else {
+            var num = Number(el.value);
+            v[k] = isFinite(num) ? num : 0;
+        }
+        markStale();
+    });
+
+    /* 该角色在剧本里的引用面：删之前先摊开，别让「无法撤销」变成一句空话 */
+    function castRefs(role) {
+        var out = { speaker: 0, stage: 0, cue: 0, scenes: {} };
+        out.stage = state.baseStage.filter(function (s) { return s.role === role; }).length;
+        lines().forEach(function (line) {
+            var hit = false;
+            if ((line.role || firstRole(state.cast)) === role) { out.speaker++; hit = true; }
+            if ([].concat(line.enter || []).indexOf(role) >= 0) hit = true;
+            if ([].concat(line.exit || []).indexOf(role) >= 0) hit = true;
+            if (line.cues && line.cues[role]) { out.cue++; hit = true; }
+            if (line.move && line.move[role]) hit = true;
+            if (hit) out.scenes[state.file] = 1;
+        });
+        return out;
+    }
+
+    function delCastRole(role) {
+        var refs = castRefs(role);
+        var bits = [];
+        if (refs.stage) bits.push('本场登场阵容里的站位');
+        if (refs.speaker) bits.push(refs.speaker + ' 句台词');
+        if (refs.cue) bits.push(refs.cue + ' 处同台演出');
+        var detail = bits.length ? '\n\n会一起清掉：' + bits.join('、') + '。' : '\n\n本场没有引用它。';
+        if (!window.confirm('删除角色「' + role + '」？' + detail + '\n无法撤销。')) return;
+        delete state.cast[role];
+        // 剧本里所有对它的引用一并清理
+        lines().forEach(function (line) {
+            if (line.role === role) delete line.role;
+            ['enter', 'exit'].forEach(function (k) {
+                if (Array.isArray(line[k])) {
+                    line[k] = line[k].filter(function (r) { return r !== role; });
+                    if (!line[k].length) delete line[k];
+                } else if (line[k] === role) delete line[k];
+            });
+            if (line.cues) { delete line.cues[role]; if (!Object.keys(line.cues).length) delete line.cues; }
+            if (line.move) { delete line.move[role]; if (!Object.keys(line.move).length) delete line.move; }
+        });
+        state.baseStage = state.baseStage.filter(function (s) { return s.role !== role; });
+        state.castSel = castKeys()[0] || '';
+        state.castAct = null;
+        markStale();
+        renderEditor();
+    }
+
+    function delCastAct(role, act) {
+        if (!act) return;
+        if (!window.confirm('删除动作宏「' + act + '」？剧本里 action 填它的行会清掉该字段。')) return;
+        var item = state.cast[role];
+        if (item && item.actions) delete item.actions[act];
+        lines().forEach(function (line) {
+            if (line.action === act) delete line.action;
+            if (line.cues) Object.keys(line.cues).forEach(function (r) {
+                if (line.cues[r] && line.cues[r].action === act) delete line.cues[r].action;
+            });
+        });
+        state.castAct = null;
+        markStale();
+        renderEditor();
+    }
+
+    /* 改角色 id：cast 的键 + 剧本所有引用一起迁移 */
+    function renameCastRole(oldName, newName) {
+        newName = (newName || '').trim();
+        if (!newName || newName === oldName || newName === 'doc') { renderCastFields(); return; }
+        if (state.cast[newName]) { msg('角色「' + newName + '」已存在'); renderCastFields(); return; }
+        if (!window.confirm('把角色「' + oldName + '」改名为「' + newName + '」？剧本引用会同步更新。')) {
+            renderCastFields(); return;
+        }
+        // 重建 cast 以保持键顺序
+        var rebuilt = {};
+        Object.keys(state.cast).forEach(function (k) {
+            rebuilt[k === oldName ? newName : k] = state.cast[k];
+        });
+        state.cast = rebuilt;
+        // 剧本引用
+        lines().forEach(function (line) {
+            if (line.role === oldName) line.role = newName;
+            ['enter', 'exit'].forEach(function (k) {
+                if (Array.isArray(line[k])) line[k] = line[k].map(function (r) { return r === oldName ? newName : r; });
+                else if (line[k] === oldName) line[k] = newName;
+            });
+            if (line.cues && line.cues[oldName]) {
+                line.cues[newName] = line.cues[oldName]; delete line.cues[oldName];
+            }
+            if (line.move && line.move[oldName]) {
+                line.move[newName] = line.move[oldName]; delete line.move[oldName];
+            }
+        });
+        state.baseStage.forEach(function (s) { if (s.role === oldName) s.role = newName; });
+        state.castSel = newName;
+        markStale();
+        renderEditor();
+    }
+
+    /* 改动作宏名：cast.actions 的键 + 剧本里对该角色的 action 引用一起迁移 */
+    function renameCastAct(role, oldName, newName) {
+        newName = (newName || '').trim();
+        if (!newName || newName === oldName) { renderCastFields(); return; }
+        var acts = (state.cast[role] || {}).actions || {};
+        if (acts[newName]) { msg('动作宏「' + newName + '」已存在'); renderCastFields(); return; }
+        if (!window.confirm('把动作宏「' + oldName + '」改名为「' + newName + '」？剧本引用会同步更新。')) {
+            renderCastFields(); return;
+        }
+        var rebuilt = {};
+        Object.keys(acts).forEach(function (k) {
+            rebuilt[k === oldName ? newName : k] = acts[k];
+        });
+        state.cast[role].actions = rebuilt;
+        // 只对「这个角色」的 action 引用改名，避免误伤别的角色同名宏
+        lines().forEach(function (line) {
+            if (line.role === role && line.action === oldName) line.action = newName;
+            if (line.cues && line.cues[role] && line.cues[role].action === oldName) {
+                line.cues[role].action = newName;
+            }
+        });
+        state.castAct = newName;
+        markStale();
+        renderEditor();
     }
 
     /* head 里的脚本执行时控件还没解析，一律用事件委托 */
@@ -1914,6 +2791,10 @@
         }
         // 即时台词面板内的点击交给面板自己处理，不推进剧本
         if (target.closest && target.closest('#st-live')) return;
+        // 角色卡（含绑定展开、存为宏）自己处理点击，别落到剧本行的删除/移动上
+        if (target.closest && target.closest('#st-stage-list')) return;
+        // 角色表页内的点击交给它自己的委托处理，不落到剧本行操作
+        if (target.closest && target.closest('#st-view-cast')) return;
         if (state.mode !== 'edit') {
             if (state.liveOpen) return;      // 即时台词打开时冻结剧本推进
             if (target.closest && target.closest('#st-bar')) return;
@@ -1989,20 +2870,6 @@
 
             // 播放器按角色懒创建（audioFor），各自把口型打到自己的 player 上
             stopVoices();
-
-            // 时间线清单取所有登场角色的并集，供自定义动作下拉使用
-            var dl = $('st-tl-list');
-            var labels = {}, dup = 0;
-            state.stage.forEach(function (slot) {
-                var p = playerOf(slot.role);
-                (p && p.mainTimelineLabels || []).forEach(function (t) {
-                    if (!labels[t]) {
-                        labels[t] = 1;
-                        var o = document.createElement('option');
-                        o.value = t; dl.appendChild(o);
-                    } else dup++;
-                });
-            });
 
             applyScene(state.scene, state.cast);   // 内部会 resetStage + syncLayout
             state.speaker = (state.stage[0] && state.stage[0].role) || firstRole(state.cast);

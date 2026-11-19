@@ -298,13 +298,28 @@ function storyTarget(name) {
     return { abs: join(SCENE_DIR, name), rel: 'steins_gate/story/scenes/' + name, kind: 'scene' };
 }
 
+/* 动作对象只有三个字段：主时间线 + 两个差分槽；写错类型在载入时就该报出来，
+   而不是等播放时 diffTimelineSlot1 = 123 静默失效 */
+function validateActionObj(act, at) {
+    for (const k of ['timeline', 'diffSlot1', 'diffSlot2']) {
+        if (act[k] !== undefined && typeof act[k] !== 'string') {
+            throw new Error(at + ' 的 ' + k + ' 须为字符串');
+        }
+    }
+}
+
 function validateStory(kind, data) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('必须是 JSON 对象');
     if (kind === 'cast') {
         for (const [role, entry] of Object.entries(data)) {
             if (role === 'doc') continue;
-            if (!entry || typeof entry !== 'object' || typeof entry.model !== 'string' || !entry.model) {
-                throw new Error('角色「' + role + '」缺少 model');
+            if (!entry || typeof entry !== 'object') {
+                throw new Error('角色「' + role + '」须为对象');
+            }
+            // model 允许缺省：角色可以先建、后绑皮。没绑模型的角色不会出现在登场阵容里
+            // （story.js 的 castRoles / stageOf 都按 !!model 过滤）。
+            if (entry.model !== undefined && typeof entry.model !== 'string') {
+                throw new Error('角色「' + role + '」的 model 须为字符串');
             }
             if (entry.name !== undefined && typeof entry.name !== 'string') {
                 throw new Error('角色「' + role + '」的 name（显示名）须为字符串');
@@ -337,7 +352,7 @@ function validateStory(kind, data) {
             if (typeof line.action === 'string') { /* 宏名 */ }
             else if (!line.action || typeof line.action !== 'object' || Array.isArray(line.action)) {
                 throw new Error(at + 'action 须为宏名字符串或动作对象');
-            }
+            } else validateActionObj(line.action, at + 'action');
         }
         if (line.cues !== undefined) {
             if (!line.cues || typeof line.cues !== 'object' || Array.isArray(line.cues)) {
@@ -354,6 +369,9 @@ function validateStory(kind, data) {
                 if (cue.action !== undefined && typeof cue.action !== 'string'
                     && (!cue.action || typeof cue.action !== 'object' || Array.isArray(cue.action))) {
                     throw new Error(at + 'cues.' + role + '.action 须为宏名字符串或动作对象');
+                }
+                if (cue.action && typeof cue.action === 'object') {
+                    validateActionObj(cue.action, at + 'cues.' + role + '.action');
                 }
             }
         }

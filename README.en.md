@@ -27,7 +27,7 @@ The homepage `index.html` has three in-page tabs ("Works / Characters / Tech") p
 - **Lip sync** — offline WebAudio envelope analysis driving `face_talk` via rAF lookup. No fallback playback path; audio failures are reported and skipped.
 - **Scene UI** — character tabs with a model panel, a background preview panel, and tab reordering. Order is written back to `character/actions_config/order.json`; backgrounds and cards read the 720p thumbnails in `static/background/.thumbs/`.
 - **Story Mode** — `/steins_gate/story/` is a single page with two modes: a visual scene editor (drag / ▲▼ / add-remove lines) and a typewriter player (click / auto advance / voice / action macros). Character bindings live in `steins_gate/story/cast.json`, scenes in `steins_gate/story/scenes/*.json`. It supports **multiple characters on stage**: a scene's `stage` array lists who appears and where (`x` -1..1, `scale`, `z`), each line's `role` picks the speaker (whose action / voice / lip-sync follow him), and other on-stage roles get their own `cues` entries on that line (separate players, no cut-offs). A line's `enter` / `exit` brings characters on or off mid-scene, and `move` changes blocking within the same scene (omit it to inherit the previous line). Omitting `stage` auto-spreads the roles seen in the lines, so older scripts keep working. The player's "Live line" panel lets you type text + pick audio (a local file or one from the `character/sounds/` audio list) or synthesize it, and make the selected on-stage character speak without a script.
-- **Dev panel** — built-in inspector for selectors, poses and variables (`installDevPanel`).
+- **Dev panel** — built-in inspector for selectors, poses and variables (`installDevPanel`). The "③ Variable tuning" section has a "Copy params" button that exports the current slider values as a `variables` array JSON (`[{name,value,duration}, ...]`), **skipping any item with `value=0`** (0 is the reset state and meaningless in an action); it says "no nonzero values" when everything is 0.
 
 ### Multiple characters on stage (Story Mode)
 
@@ -62,25 +62,35 @@ A scene can keep several characters on screen at once. Bind each role to a model
   { "role": "Kurisu", "text": "...Fine. I'm Makise Kurisu.", "name": "Kurisu" }
   ```
 
-  The default lives in `cast.json`: `{ "Kurisu": { "model": "...", "name": "Assistant" } }`; without it the key is used. The key is the internal id (script references, voice folder, model binding all hang off it) — the display name only changes the text on screen, so nothing breaks. Both are editable: "Display name" in the cast panel is the global default, the "Display name" field of the selected line is that line's override (empty = inherit, `⟲` fills in the role's real name for a reveal).
+  The default lives in `cast.json`: `{ "Kurisu": { "model": "...", "name": "Assistant" } }`; without it the key is used. The key is the internal id (script references, voice folder, model binding all hang off it) — the display name only changes the text on screen, so nothing breaks. Two layers in the editor: the "Display name" of the selected line applies **from that line on** (empty = inherit, `⟲` fills in the role's real name for a reveal, the adjacent "set as default" turns it into the role default); the "Display name" on the cast tab is the **global default**.
 - Each line's `role` picks the speaker: `action` comes from `cast[role].actions`, `voice` from `cast[role].voiceDir`.
 - `cues`: **per-character performance for the same line** — other on-stage roles can each get their own `action` / `voice` (both optional):
 
   ```json
   "cues": {
     "Kurisu": { "action": "surprised", "voice": "resg00_01_krs0005.xwma.opus" },
-    "Suzuha": { "action": { "timeline": "表情_笑う", "diffSlot1": "ひく" } }
+    "Suzuha": { "action": { "timeline": "表情_笑う", "diffSlot1": "ひく", "diffSlot2": "" } }
   }
   ```
 
-  Every role gets its own audio player, so lip-sync and playback stay on that character and two people can talk at once without cutting each other off. The editor's "This line's performance" block gives one card per role; the speaker's card writes to the line-level `action` / `voice`.
-- Auto-advance is not a line property: the `AUTO` button at the **bottom-right of the dialogue box** is a global toggle. When lit, each line waits for the speaker's voice (plus that line's `wait`) and then advances; clicking the screen still advances immediately. The toggle is remembered in localStorage. The legacy per-line `auto` field is ignored on read and stripped on save.
-- The editor's "Cast on stage" shows one card per role, three rows that cover everything that role does on this line:
+  An action object has exactly three fields: `timeline` (main timeline) and `diffSlot1` / `diffSlot2` (two independent diff slots). Omit a field to leave it alone; an empty string clears it explicitly (say the previous line had a `diffSlot2` and this one must drop it).
+
+  Every role gets its own audio player, so lip-sync and playback stay on that character and two people can talk at once without cutting each other off.
+- Auto-advance is not a line property: the `AUTO` button on the dialogue box (native `main.psb.m` slices, placed where the game puts it — bottom-left, `left:26 / top:1022`) is a global toggle. When lit, each line waits for the speaker's voice (plus that line's `wait`) and then advances; clicking the screen still advances immediately. The toggle is remembered in localStorage. The legacy per-line `auto` field is ignored on read and stripped on save.
+- The right panel is organised one section per line: `Scene` → `Line N`. The line number appears once — speaker, display name, text, AUTO pause and this line's **cast on stage** all live in that single "Line N" block ("Cast on stage" is an inline sub-heading, no longer a section of its own). `cast.json` no longer takes a slot in the right panel.
+- "Cast on stage" shows one card per role, four rows that cover everything that role does on this line:
   1. role dropdown (who is in the scene) + keep / enter / exit (this line's `enter`/`exit`) + remove;
   2. position and scale — **line 1 is the scene default** (stored in `stage`), editing from line 2 onwards writes that line's `move`, otherwise it inherits (grey = inherited, orange = overridden, `↺` drops back);
-  3. this line's action and voice — the speaker writes line-level `action`/`voice`, other roles write `cues`; picking "custom…" expands timeline / diff / save-as-macro in place.
-  There are no separate "Blocking" or "Performance" blocks any more: where a role stands and what it does on this line live in its own card.
-- All of it is editable in the right panel of edit mode (role cards, this line's display name, cast bindings and their default display names); "Save" writes back to JSON. Switching to a scene that needs new models reloads the page once.
+  3. this line's action and voice — the speaker writes line-level `action`/`voice`, other roles write `cues`; picking "custom…" expands **main timeline / diff slot 1 / diff slot 2** as three dropdowns, and typing a name + "save as macro" writes it into `cast[role].actions`;
+  4. **binding**, collapsed to one summary line (`Binding  Kurisu_white ▸`): open it for the model dropdown and the voice folder — "which skin, where the audio lives" belongs to the role itself.
+  All three dropdowns are filled from that role's model, so you can re-pick at any time without clearing first; empty means "leave as is" (an empty diff slot explicitly clears it).
+  There are no separate "Blocking" or "Performance" blocks any more: where a role stands, what it does and which model it wears all live in its own card.
+- Display names surface everywhere in the editor: the line list, the speaker dropdown and the role-card dropdown all show the `cast` display name (with `(internal id)` appended when it differs, so duplicates stay distinguishable), and the "Display name" field's `inherit: X` hint updates as you type.
+- Next to "Display name" there is `⟲` (fill in the role's real name, for a reveal) and "set as default": the latter writes the current value as that role's **default name** into `cast[role].name`. You never leave the line to name a character.
+- The left column has two **tabs**, `Script` / `Cast`, sharing the same area; `Esc` goes back to the script. The cast tab gives its space to the `roles / action macros / properties` three-column view (the right panel steps aside) for auditing, renaming and deleting; each macro row shows its main timeline inline, so you don't have to open them one by one. Everyday edits (model, default name, macros) still happen where they are used — on the role card, the line's "set as default", "save as macro" — so there is no need to visit this tab.
+- There is exactly **one "Save"**: scene and `cast.json` are written together (`saveCurrent` PUTs both files). The cast tab has no save button of its own.
+- **Variables from stage into script**: after tuning a set of values in the LAB page's "Variable tuning", click "Copy params" (exports nonzero `variables` JSON), then in the cast tab select an action macro → "variables" fields → "Paste import", and paste the JSON to bulk-add variable rows (or edit name/value/duration/delay row by row; Ctrl+Enter imports quickly). This lets an action macro carry the tuned diff/expression variables.
+- Switching to a scene that needs new models reloads the page once; changing a model in a role card says so explicitly ("takes effect after saving and reloading").
 - `stage` is optional: when absent, the roles seen in the lines are spread evenly, so existing scripts need no changes. See `steins_gate/story/scenes/demo.json` for a full example.
 
 ## Quick start
