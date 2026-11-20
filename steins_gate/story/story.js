@@ -993,7 +993,6 @@
         applyLineStage(line, state.mode === 'play' && state.idx > 0);
         state.speaker = role;
         var shownName = displayNameAt(state.idx);
-        $('st-name').textContent = shownName;
         $('st-name').classList.toggle('is-alias', shownName !== castName(role));   // 用的是别名/未知名时淡一点
         if (window.SGDialog) window.SGDialog.setName(shownName);   // 名牌按名字长度选档并重擦
         setProgress();
@@ -1142,7 +1141,6 @@
         // 打开时冻结剧本当前行，避免打字机把台词覆盖
         clearTimers();
         if (state.ctx) stopVoices();
-        $('st-name').textContent = castName(state.liveRole);
         $('st-name').classList.remove('is-alias');
         if (window.SGDialog) window.SGDialog.setName(castName(state.liveRole));
         $('st-text').textContent = '';
@@ -1237,7 +1235,6 @@
         catch (err) { urlPromise = Promise.reject(err); }
 
         // 打字机 + 显示名字（即时台词没有剧情上下文，用角色默认名）
-        $('st-name').textContent = castName(state.liveRole);
         $('st-name').classList.remove('is-alias');
         if (window.SGDialog) window.SGDialog.setName(castName(state.liveRole));
         var mySeq = ++state.seq;

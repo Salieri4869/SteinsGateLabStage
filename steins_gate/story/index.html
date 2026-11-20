@@ -209,14 +209,21 @@
             .hud-deco .deco-chg { display: none !important; }
         }
 
-        /* 文字盒等于整块底板宽并居中，垂直也跟着底板（59px 行高）走，
-           这样名字恒定落在底板几何中心；左右内边距由脚本按对称值算 */
+        /* 名字居中不靠 text-align + 行高硬撑：那样水平会被「末字字距」往左推半格，
+           垂直也受字体 ascent/descent 摆布。改成 flex：盒子恒等于底板矩形，
+           文字作为唯一的 flex item 被真正居中。
+           竖直方向的最终位置由脚本算：底板贴图里六边形比盒子中心高 4px，
+           文字要落在六边形中线上，光靠 padding 补不出来（见 sg-dialog.js 的 PLATE_MID） */
         #st-name {
-            position: absolute; height: 59px; line-height: 59px; text-align: center;
+            position: absolute; height: 59px;
+            display: flex; align-items: center; justify-content: center;
+            line-height: 1;
             font-weight: 500; letter-spacing: .04em; font-size: 27px;
-            text-indent: .04em;   /* 抵消末字字距，让视觉重心真正居中 */
             color: #101718; white-space: nowrap; overflow: hidden;
         }
+        /* letter-spacing 会在末字后再留一格，居中时整行会偏左半格；
+           用等量的负右边距吃掉它，剩下的才是字形本身的中点 */
+        #st-name > span { margin-right: -.04em; }
         /* 这一句用的是别名 / 未知名（「？？？」）时压暗一点，一眼能看出来 */
         #st-name.is-alias { color: #3f4b4e; }
 

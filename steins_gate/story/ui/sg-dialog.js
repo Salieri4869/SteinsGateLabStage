@@ -37,6 +37,13 @@
     var NAME_PAD = 56;                // 左右对称留白：文字按底板几何中心居中
     var NAME_FONT = 30;               // 名牌上的字号（放不下就缩，不放大）
     var NAME_FONT_MIN = 15;
+    var MEASURE_PX = 240;             // 量字体度量用的字号：够大，按比例缩回小字号时误差 < 0.05px
+    var PLATE_H = 59;                 // 底板素材高度（四档一样）
+    /* 底板贴图里白色六边形的视觉中线，按 0–59 的位图坐标：四档素材实测都是 25.5。
+       六边形的左右尖角就落在这一行，所以它才是「眼睛看到的中线」，而不是盒子中心 29.5。
+       贴图里六边形下方还挂着一截装饰柄，把整块六边形顶到了盒子上半部分 ——
+       文字按盒子居中就会低约 4px，这是之前怎么补都补不准的真正原因。 */
+    var PLATE_MID = 25.5;
     /* 与 index.html 的 "SG Sans"（思源黑体 Medium）保持一致：
        名字在 DOM 里用什么字体，这里量宽就必须用什么字体，否则档位会选错 */
     var NAME_FAMILY = '"SG Sans","Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif';
@@ -250,11 +257,12 @@
     /* ---------- 名牌尺寸：按字数选档，放不下再缩字号 ---------- */
 
     var mctx = null;
-    function measure(text, size) {
+    function metrics(text, size) {
         if (!mctx) mctx = document.createElement('canvas').getContext('2d');
         mctx.font = NAME_WEIGHT + ' ' + size + 'px ' + NAME_FAMILY;
-        return mctx.measureText(text).width;
+        return mctx.measureText(text);
     }
+    function measure(text, size) { return metrics(text, size).width; }
 
     function pickPlate(text) {
         var need = measure(text, NAME_FONT);
@@ -284,11 +292,47 @@
         });
         el.nameImg.src = opt.base + 'nameplate_' + spec.size + '.webp';
         el.nameWhiteImg.src = el.nameImg.src;
-        /* 文字盒 = 整块底板：居中交给 text-align，位置就恒等于底板中心 */
+        /* 文字盒 = 整块底板：水平居中交给 flex，位置就恒等于底板中心 */
         el.nameText.style.left = left + 'px';
         el.nameText.style.width = spec.width + 'px';
         el.nameText.style.top = PLATE_TOP + 'px';
         el.nameText.style.fontSize = spec.font + 'px';
+        /* 竖直方向不再试凑行高，直接把「字形墨迹的中心」摆到六边形中线上。
+           line-height:1 时行盒只有 1em，而字体盒（fontBoundingBox）比 1em 高，
+           浏览器把字体盒在行盒里居中，于是基线位置可以算出来：
+             行盒顶 = (盒子高 - 字号) / 2
+             基线   = 行盒顶 + (字号 - 字体盒高) / 2 + 字体盒上沿
+             墨迹中心 = 基线 + (墨迹下沿 - 墨迹上沿) / 2
+           与 PLATE_MID 的差就是要抬的量：随字号等比，缩字号、长名字都成立。
+           度量统一在 MEASURE_PX 上取再按比例缩 —— canvas 给的字体度量是整数，
+           小字号直接量会被取整吃掉半个像素（26px 实测差 0.5px）。 */
+        var txt = el.nameText.textContent || '';
+        var m = metrics(txt, MEASURE_PX);
+        var shift;
+        if (m.fontBoundingBoxAscent && m.actualBoundingBoxAscent != null) {
+            var k = spec.font / MEASURE_PX;
+            var fbAsc = m.fontBoundingBoxAscent * k, fbDesc = m.fontBoundingBoxDescent * k;
+            var lineTop = (PLATE_H - spec.font) / 2;
+            var baseline = lineTop + (spec.font - (fbAsc + fbDesc)) / 2 + fbAsc;
+            var inkMid = baseline + (m.actualBoundingBoxDescent - m.actualBoundingBoxAscent) * k / 2;
+            shift = PLATE_MID - inkMid;
+        } else {
+            shift = -spec.font * 0.183;     // 拿不到字体度量时的退路：30px ≈ 抬 5.5px
+        }
+        el.nameText.style.transform = 'translateY(' + shift.toFixed(2) + 'px)';
+    }
+
+    /* 名字文字挂一层 span：flex 容器里只有一个 item 才能被精确居中，
+       样式里的负右边距也正好抵掉 letter-spacing 的末字空隙 */
+    function setNameText(text) {
+        if (!el.nameText) return;
+        var span = el.nameText.firstElementChild;
+        if (!span || span.tagName !== 'SPAN') {
+            el.nameText.textContent = '';
+            span = document.createElement('span');
+            el.nameText.appendChild(span);
+        }
+        span.textContent = text;
     }
 
     /* 换名字：空名字就把名牌整块收起来（与游戏里没记名字的行一致） */
@@ -297,7 +341,7 @@
         var name = (text == null ? '' : String(text)).trim();
         if (!name) {
             st.name = '';
-            el.nameText.textContent = '';
+            setNameText('');
             paintPlate(0);
             if (el.deco) el.deco.style.opacity = '0';
             st.decoRun = false;
@@ -305,7 +349,7 @@
         }
         var changed = name !== st.name;
         st.name = name;
-        el.nameText.textContent = name;
+        setNameText(name);
         layoutPlate(pickPlate(name));
         if (st.open <= 58) return;   // 开场还没铺完：显隐由 open() 的 60 帧自己推，别抢
         if (el.deco) el.deco.style.opacity = '1';
