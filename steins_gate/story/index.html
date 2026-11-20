@@ -5,15 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>剧情模式 · Amadeus Demo</title>
     <style>
-        /* 思源黑体 Medium（Source Han Sans SC Medium）。
-           优先用本机已装的同名字体（local 命中就不下载）；没有时回落到随包携带的
-           woff2 子集（GB2312 一级字 + 常用标点/假名 + 本工程用到的全部字符）。
-           子集由 fontTools 从 SourceHanSans-Medium.ttc 的 SC 分片生成，只保留 500 一档。 */
         @font-face {
-            font-family: "SG Sans";
+            font-family: "Source Han Sans SC";
             src: local("Source Han Sans SC Medium"),
                  local("SourceHanSansSC-Medium"),
-                 local("Source Han Sans SC"),
                  url(ui/fonts/SourceHanSansSC-Medium.subset.woff2) format("woff2");
             font-weight: 500;
             font-style: normal;
@@ -24,7 +19,7 @@
         body {
             background: #07141a center center / cover no-repeat;
             color: #e6f1ef;
-            font-family: "SG Sans", "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
+            font-family: "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
             font-weight: 500;
         }
         #canvas {
@@ -700,41 +695,26 @@
             height: 1px; margin: 8px 0 7px;
             background: rgba(99,214,196,.16);
         }
-        .st-blink-row {
-            display: flex; align-items: center; gap: 6px; margin-top: 10px;
-            font-size: 11px; color: rgba(230,241,239,.6);
+        /* 固定五列：变量名 / 值 / 时长 / 延迟 / 删除。
+           自定义名与下拉框共用第一列（同一 cell 里切换显示），不会把后面几列挤偏 */
+        .st-var-row, .st-var-head {
+            display: grid; grid-template-columns: minmax(0,1.4fr) repeat(3, minmax(0,1fr)) 19px;
+            gap: 3px;
         }
-        .st-blink-row select {
-            flex: none; background: rgba(0,0,0,.35); color: #dceae7; font-size: 11px;
-            border: 1px solid rgba(99,214,196,.2); border-radius: 3px; padding: 2px 4px;
-        }
-        .st-blink-sum {
-            flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-            font: 500 10px/1.5 ui-monospace, Consolas, monospace; color: rgba(230,241,239,.34);
-        }
-        .st-blink-row button {
-            flex: none; padding: 2px 6px; font-size: 10px; cursor: pointer; color: #9fb8b4;
-            background: transparent; border: 1px solid rgba(99,214,196,.22); border-radius: 3px;
-        }
-        .st-blink-row button:hover, .st-blink-row button.is-on { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
-        .st-blink-grid { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 7px; }
-        .st-blink-grid label { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: rgba(230,241,239,.42); white-space: nowrap; }
-        .st-blink-grid input {
-            width: 64px; box-sizing: border-box; background: rgba(0,0,0,.35); color: #dceae7;
-            font-size: 11px; border: 1px solid rgba(99,214,196,.2); border-radius: 3px; padding: 2px 4px;
-        }
-        .st-blink-grid input:disabled { opacity: .45; }
-        .st-blink-grid input::placeholder { color: rgba(230,241,239,.26); }
-        .st-blink-grid .st-blink-wide { grid-column: 1 / -1; }
-        .st-var-row {
-            display: flex; align-items: center; gap: 3px; margin-bottom: 5px;
-        }
+        .st-var-row { align-items: center; margin-bottom: 5px; }
         .st-var-row input {
             min-width: 0; background: rgba(0,0,0,.35); color: #dceae7; font-size: 11px; font-family: inherit;
             border: 1px solid rgba(99,214,196,.2); border-radius: 3px; padding: 3px 5px;
         }
-        .st-var-row .v-name { flex: 1.4; }
-        .st-var-row .v-num { flex: 1; }
+        .st-var-row select.v-name {
+            min-width: 0; background: rgba(0,0,0,.35); color: #dceae7; font-size: 11px; font-family: inherit;
+            border: 1px solid rgba(99,214,196,.2); border-radius: 3px; padding: 3px 5px;
+            color-scheme: dark;
+        }
+        .st-var-row select.v-name option { background: #16262b; color: #dceae7; }
+        .st-var-row .v-name-cell { display: flex; min-width: 0; }
+        .st-var-row .v-name-cell .v-name { flex: 1; min-width: 0; }
+        .st-var-row .v-name-cell input.v-name { color-scheme: dark; }
         .st-var-row button {
             flex: none; width: 19px; height: 20px; padding: 0; cursor: pointer;
             color: #9fb8b4; font-size: 11px; line-height: 1;
@@ -742,12 +722,8 @@
         }
         .st-var-row button:hover { color: #fff; background: #b45a4a; border-color: #b45a4a; }
         .st-var-head {
-            display: flex; gap: 3px; margin-bottom: 4px;
-            font-size: 9px; color: rgba(230,241,239,.34);
+            margin-bottom: 4px; font-size: 9px; color: rgba(230,241,239,.34);
         }
-        .st-var-head span:nth-child(1) { flex: 1.4; }
-        .st-var-head span:nth-child(n+2) { flex: 1; }
-        .st-var-head span:last-child { flex: none; width: 19px; }
         .st-var-tool {
             flex: none; padding: 4px 9px; font-size: 10px; cursor: pointer;
             color: #9fb8b4; background: transparent;
@@ -940,8 +916,8 @@
                             <input type="text" id="st-cast-act-new-name" placeholder="宏名，如 惊讶">
                             <button type="button" id="st-cast-act-new-ok">建</button>
                         </div>
-                        <!-- 当前角色的眨眼缺省：不是动作项，只作为下面所有动作的基准 -->
-                        <div class="st-blink-global" title="对角色的所有动作生效；单个动作可在右侧「眨眼 blink」里覆盖或关掉">
+                        <!-- 当前角色的眨眼缺省：整个角色生效，动作不再单独覆盖 -->
+                        <div class="st-blink-global" title="对这个角色的所有动作生效；节奏跟 wasm 自动眨眼走">
                             <label class="st-blink-on"><input type="checkbox" id="st-blink-default"> <span>默认眨眼</span></label>
                             <label class="st-blink-g-param">眼皮<input type="number" id="st-blink-g-closeValue" step="1" title="closeValue：完全闭上时眼皮线的值，10＝閉じ"></label>
                         </div>

@@ -39,14 +39,8 @@
     var NAME_FONT_MIN = 15;
     var MEASURE_PX = 240;             // 量字体度量用的字号：够大，按比例缩回小字号时误差 < 0.05px
     var PLATE_H = 59;                 // 底板素材高度（四档一样）
-    /* 底板贴图里白色六边形的视觉中线，按 0–59 的位图坐标：四档素材实测都是 25.5。
-       六边形的左右尖角就落在这一行，所以它才是「眼睛看到的中线」，而不是盒子中心 29.5。
-       贴图里六边形下方还挂着一截装饰柄，把整块六边形顶到了盒子上半部分 ——
-       文字按盒子居中就会低约 4px，这是之前怎么补都补不准的真正原因。 */
     var PLATE_MID = 25.5;
-    /* 与 index.html 的 "SG Sans"（思源黑体 Medium）保持一致：
-       名字在 DOM 里用什么字体，这里量宽就必须用什么字体，否则档位会选错 */
-    var NAME_FAMILY = '"SG Sans","Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif';
+    var NAME_FAMILY = '"Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif';
     var NAME_WEIGHT = 500;
 
     var el = {};
@@ -397,6 +391,12 @@
         el.nameWhiteImg = el.nameWhite.querySelector('img');
         el.nameText = $('st-name');
         el.caret = $('st-caret');
+
+        /* 先摆一次名牌（哪怕此刻还没有名字）：底板/白闪层/文字盒的 left·width
+           只在 layoutPlate 里写，开头不摆的话它们停在默认位置（left:auto → x=0），
+           等开场第 50 帧 paintPlate 把底板擦出来时，就会在**左下角**闪出一块
+           没字、尺寸也不对的空底板（"错误贴图"）。 */
+        layoutPlate(pickPlate(st.name || ''));
 
         buildDeco();
         paintWindow(0);

@@ -363,35 +363,9 @@
         if (typeof g.track === 'string' && g.track) out.track = g.track;
         return out;
     }
-    /* 动作级三态：false=不眨；缺省=跟随角色；对象=逐字段覆盖角色 */
-    function blinkCfgFor(act, role) {
-        var g = blinkRole(role);
-        var a = act && act.blink;
-        if (a === false) return null;
-        var own = (a && typeof a === 'object') ? a : (a === true ? {} : null);
-        if (!g.on && !own) return null;          // 角色关掉、动作也没单独开 → 不眨
-        if (!own) return g;
-        var out = {};
-        BLINK_KEYS.forEach(function (k) {
-            var v = Number(own[k]);
-            out[k] = Number.isFinite(v) ? v : g[k];
-        });
-        out.on = true;
-        ['vars', 'track'].forEach(function (k) {
-            if (own[k]) out[k] = own[k];
-            else if (g[k]) out[k] = g[k];
-        });
-        return out;
-    }
-
     function blinkNum(cfg, key) {
         var v = Number(cfg && cfg[key]);
         return Number.isFinite(v) ? v : DEFAULT_BLINK[key];
-    }
-    /* 属性区那一行摘要：跟随 SDK · 眼皮10 */
-    function blinkSummary(cfg) {
-        return (cfg && cfg.on === false ? '不眨' : '自动眨') +
-            ' · 眼皮 ' + blinkNum(cfg, 'closeValue');
     }
     /* 补眼皮推哪两个变量：显式 vars 优先，否则默认左右眼睑线 */
     function blinkVars(cfg) {
@@ -536,9 +510,11 @@
         if (Object.keys(blinkPool).length) blinkRaf = requestAnimationFrame(blinkFrame);
     }
 
+    /* 眨眼配置一律取角色级（cast.json 的 blink）：动作不再单独覆盖。
+       act 只用来取「眼皮基准快照」——动作 variables 可能本来就把它压到满闭。 */
     function startBlink(act, role) {
-        var cfg = blinkCfgFor(act, role);
-        if (!cfg) { stopBlink(role); return; }
+        var cfg = blinkRole(role);
+        if (!cfg.on) { stopBlink(role); return; }
         var p = playerOf(role);
         if (!p || typeof p.setVariableDiff !== 'function') return;
         var vars = blinkRealVars(role, blinkVars(cfg));
@@ -789,6 +765,17 @@
         });
         return wanted;
     }
+    /* 这一下点击是不是「刚把音频解锁」的那一下。是的话它只用来解锁、不推进剧情，
+       否则刚解锁的首句会被下一句的 stop() 当场掐掉 —— 表现就是「第一句永远没声音，
+       从第二句起才正常」。 */
+    function consumeAudioUnlock() {
+        var hit = false;
+        Object.keys(audioPool).forEach(function (r) {
+            var ap = audioPool[r];
+            if (ap && ap.consumeGestureUnlock && ap.consumeGestureUnlock()) hit = true;
+        });
+        return hit;
+    }
     function setProgress() {
         var total = lines().length;
         var at = state.ended ? total : state.idx + 1;
@@ -1019,6 +1006,8 @@
     function step() {
         if (state.mode !== 'play') return;
         if (state.introPending) return;   // 开场动画还在铺：这一下不抢台词
+        /* 这一下刚把音频解锁：只补完打字，不推进台词 —— 否则刚解锁的首句会被下一句的 stop() 当场掐掉 */
+        if (consumeAudioUnlock()) { skipTyping(); return; }
         if (skipTyping()) return;
         if (state.ended) { restart(); return; }
         if (state.idx + 1 >= lines().length) { showEnd(); return; }
@@ -2115,68 +2104,76 @@
         pastePanel.appendChild(pasteOps);
         wrap.appendChild(pastePanel);
 
-        // ---- 眨眼 blink（一行三态 + 摘要，参数折叠在后面）----
-        var bHead = document.createElement('div');
-        bHead.className = 'st-sub';
-        bHead.innerHTML = '<h4>眨眼 blink</h4>';
-        wrap.appendChild(bHead);
+        // ---- 眨眼不在这里配：节奏由 wasm 自动眨眼驱动，开关与眼皮值在角色表顶部 ----
 
-        var gcfg = blinkRole(role);
-        var bModeVal = (a.blink === false) ? 'off'
-            : (a.blink && typeof a.blink === 'object') ? 'on'
-                : (a.blink === true) ? 'on' : '';
-        var eff = blinkCfgFor(a, role);              // 实际生效的配置；null = 不眨
-        var own = (a.blink && typeof a.blink === 'object') ? a.blink : {};
-
-        var bRow = document.createElement('div');
-        bRow.className = 'st-blink-row';
-        var bMode = document.createElement('select');
-        bMode.dataset.key = 'blink-mode';
-        [['', '继承角色（' + (gcfg.on ? '眨' : '不眨') + '）'], ['on', '强制开'], ['off', '强制关']]
-            .forEach(function (o) {
-                var op = document.createElement('option');
-                op.value = o[0]; op.textContent = o[1]; bMode.appendChild(op);
-            });
-        bMode.value = bModeVal;
-        bRow.appendChild(bMode);
-
-        var bSum = document.createElement('span');
-        bSum.className = 'st-blink-sum';
-        bSum.textContent = eff ? blinkSummary(eff) : '不眨';
-        bSum.title = eff ? blinkSummary(eff) : '这个动作不眨眼';
-        bRow.appendChild(bSum);
-
-        wrap.appendChild(bRow);
-
-        var bGrid = document.createElement('div');
-        bGrid.className = 'st-blink-grid';
-
-        var lab = document.createElement('label');
-        lab.textContent = '眼皮';
-        lab.title = '完全闭上时眼皮的值，默认 10（就是模型里的 閉じ）';
-        var input = edInput('number', own.closeValue != null ? String(own.closeValue) : '',
-            'blink-closeValue', String(blinkNum(eff, 'closeValue')));
-        input.disabled = !eff;
-        lab.appendChild(input);
-        bGrid.appendChild(lab);
-        wrap.appendChild(bGrid);
-        wrap.appendChild(edHint('眨眼不用手动排节奏：角色会自己眨，大约每 1–3 秒一次。' +
-            '这里只需要填「完全闭上时眼皮的值」，默认 10，也就是模型里的 閉じ。' +
-            '换表情、切动作时眼睛会自然过渡，不会卡住；' +
-            '如果这个动作本来就是闭眼表情（閉じ / 笑閉じ），会自动跳过，不会强行再眨一下。'
-        ));
-
-        var varNames = (playerOf(role) && playerOf(role).variableList || [])
-            .map(function (v) { return v.label || v.name || v; });
-        var dl = document.createElement('datalist');
-        dl.id = 'st-cast-var-names';
-        varNames.forEach(function (n) {
-            var o = document.createElement('option'); o.value = n; dl.appendChild(o);
-        });
-        wrap.appendChild(dl);
-
-        wrap.appendChild(edHint('变量名可以从列表里选，也能直接输入。值填数字，时长和延迟填毫秒（ms）。' +
+        wrap.appendChild(edHint('变量名从下拉里选；列表里没有的选「自定义…」后直接输入，回车或点别处确认。值填数字，时长和延迟填毫秒（ms）。' +
             '想省事的话：先在舞台页控制台的「变量微调」里调好，点「复制参数」，再回到这里点「粘贴导入」，一次就能全部带进来。'));
+    }
+
+    /* 模型声明的变量名（label 优先，与 stage 面板一致） */
+    function varNamesFor(role) {
+        var p = playerOf(role);
+        try {
+            return ((p && p.variableList) || []).map(function (v) { return v.label || v.name || v; });
+        } catch (_) { return []; }
+    }
+
+    /* 变量名那一格：选项 = 模型声明的变量 + 当前值（未声明时也并入）+「自定义…」 */
+    function buildVarNameCell(role, v) {
+        var cell = document.createElement('div');
+        cell.className = 'v-name-cell';
+        var name = document.createElement('select');
+        name.className = 'v-name'; name.dataset.k = 'name';
+        var opts = varNamesFor(role).slice();
+        if (v.name && opts.indexOf(v.name) < 0) opts.push(v.name);
+        opts.forEach(function (n) {
+            var opt = document.createElement('option');
+            opt.value = n; opt.textContent = n; name.appendChild(opt);
+        });
+        var customOpt = document.createElement('option');
+        customOpt.value = '__custom__'; customOpt.textContent = '自定义…';
+        name.appendChild(customOpt);
+        name.value = v.name && opts.indexOf(v.name) >= 0 ? v.name : '__custom__';
+        name.title = v.name || '变量名';
+        cell.appendChild(name);
+        return cell;
+    }
+
+    /* 选中「自定义…」时把 select 原地换成输入框：Enter / 失焦写回，Esc 还原。
+       自定义名作为 option 直接并入下拉，所以每行只有 v.name 一个真值，
+       没有 hidden 状态、没有第二个 dataset.k、也不需要 ▾ 按钮。 */
+    function beginVarNameEdit(row, v) {
+        var cell = row.querySelector('.v-name-cell');
+        if (!cell) return;
+        var sel = cell.querySelector('select.v-name');
+        if (!sel || cell.querySelector('input.v-name')) return;
+        var orig = v.name || '';
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'v-name';
+        input.value = orig;
+        input.placeholder = '自定义变量名';
+        input.title = orig || '自定义变量名';
+        cell.replaceChild(input, sel);
+        input.focus(); input.select();
+        var finalized = false;
+        function finish(restore) {
+            if (finalized) return;
+            finalized = true;
+            v.name = restore ? orig : input.value.trim();
+            markStale();
+            // 只重建当前行这一格：用户若点「值」输入框来失焦，那个目标不会被移除
+            cell.parentNode.replaceChild(buildVarNameCell(state.castSel, v), cell);
+        }
+        input.addEventListener('input', function () {
+            v.name = input.value;
+            markStale();
+        });
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); finish(false); }
+            else if (e.key === 'Escape') { e.preventDefault(); finish(true); }
+        });
+        input.addEventListener('blur', function () { finish(false); });
     }
 
     function renderCastVars(box, role, vars) {
@@ -2185,11 +2182,7 @@
             var row = document.createElement('div');
             row.className = 'st-var-row';
             row.dataset.i = String(i);
-            var name = document.createElement('input');
-            name.className = 'v-name'; name.dataset.k = 'name';
-            name.value = v.name || ''; name.setAttribute('list', 'st-cast-var-names');
-            name.placeholder = '变量名'; name.title = v.name || '变量名';
-            row.appendChild(name);
+            row.appendChild(buildVarNameCell(role, v));
             var value = document.createElement('input');
             value.className = 'v-num'; value.type = 'number'; value.dataset.k = 'value';
             value.value = (v.value != null ? String(v.value) : '0'); value.title = '值';
@@ -2954,36 +2947,6 @@
             renderCastActList();
             return;
         }
-        if (key === 'blink-mode') {
-            var bAct = selCastAct();
-            if (!bAct) return;
-            var mode = el.value;
-            if (mode === 'off') bAct.blink = false;
-            else if (mode === 'on') {
-                if (!bAct.blink || typeof bAct.blink !== 'object') bAct.blink = {};
-            } else delete bAct.blink;
-            markStale();
-            renderDrawer();          // 重绘一次，摘要与参数跟着变
-            return;
-        }
-        if (key.indexOf('blink-') === 0) {
-            var bTarget = selCastAct();
-            if (!bTarget) return;
-            if (!bTarget.blink || typeof bTarget.blink !== 'object') bTarget.blink = {};
-            var blink = bTarget.blink;
-            var field = key.slice(6);
-            if (field === 'vars') {
-                var s = el.value.trim();
-                if (s) blink.vars = s; else delete blink.vars;
-            } else if (el.value === '') {
-                delete blink[field];   // 留空＝跟随默认值
-            } else {
-                var n = Number(el.value);
-                if (Number.isFinite(n)) blink[field] = Math.max(0, n);
-            }
-            markStale();
-            return;
-        }
     }
 
     /* 即时生效、不需要重绘的文本字段 */
@@ -3014,7 +2977,10 @@
             var a = selCastAct();
             if (!a) return;
             var vars = a.variables || (a.variables = []);
-            vars.push({ name: '', value: 0, duration: DEFAULT_VAR_DURATION, delay: 0 });
+            vars.push({
+                name: varNamesFor(state.castSel)[0] || '',
+                value: 0, duration: DEFAULT_VAR_DURATION, delay: 0
+            });
             markStale();
             renderCastVars($('st-cast-var-list'), state.castSel, vars);
             return;
@@ -3084,7 +3050,7 @@
         }
     });
     // 变量行的四个输入：委托在 fields 上，单独处理（dataset.k）
-    document.addEventListener('input', function (evt) {
+    function onVarFieldInput(evt) {
         var el = evt.target;
         if (!el.dataset || el.dataset.k == null) return;
         var row = el.closest && el.closest('.st-var-row');
@@ -3094,12 +3060,20 @@
         var v = a.variables[Number(row.dataset.i)];
         if (!v) return;
         var k = el.dataset.k;
-        if (k === 'name') v.name = el.value;
-        else {
+        if (k === 'name') {
+            if (el.value === '__custom__') beginVarNameEdit(row, v);
+            else v.name = el.value;
+        } else {
             var num = Number(el.value);
             v[k] = isFinite(num) ? num : 0;
         }
         markStale();
+    }
+    document.addEventListener('input', onVarFieldInput);
+    // select 的 change 兜底（部分浏览器不为 select 派发 input）
+    document.addEventListener('change', function (evt) {
+        var el = evt.target;
+        if (el && el.tagName === 'SELECT' && el.dataset && el.dataset.k === 'name') onVarFieldInput(evt);
     });
 
     /* 该角色在剧本里的引用面：删之前先摊开，别让「无法撤销」变成一句空话 */
