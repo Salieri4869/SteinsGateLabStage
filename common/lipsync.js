@@ -107,11 +107,28 @@ class LipSyncPlayer {
         this.startTime = 0;
         this.rafId = null;
         this.active = false;
+        this.context = null;
+        this._playSeq = 0;
+        this._unlockAt = 0;
+        this._ctxWaiters = [];
     }
 
     loadAndPlay(url) {
         if (!url) return Promise.resolve(null);
-        return this._play(url).then((buffer) => buffer);
+        const seq = ++this._playSeq;
+        return this._whenUnlocked().then((ctx) => {
+            if (!ctx || seq !== this._playSeq) return null;
+            return this._play(url);
+        });
+    }
+
+    /* onload 自动播放被浏览器策略挂起时，首次手势只用来解锁音频、不推进剧情，
+       否则刚解锁的首句会被下一句的 stop() 掐掉。
+       只在解锁后极短窗口内生效，避免误吞 AUTO 定时器的下一次推进。 */
+    consumeGestureUnlock() {
+        if (!this._unlockAt || performance.now() - this._unlockAt > 250) return false;
+        this._unlockAt = 0;
+        return true;
     }
 
     /** 只停口型驱动，不碰音频源：时间线走完不等于音频播完 */
@@ -123,20 +140,74 @@ class LipSyncPlayer {
     }
 
     stop() {
+        this._playSeq++;
         this._stopLipSync(120);
-        if (this.activeSource) {
-            try { this.activeSource.stop(); } catch (_) { /* 已自然结束 */ }
-            this.activeSource = null;
+        const source = this.activeSource;
+        this.activeSource = null;
+        if (source) {
+            try { source.stop(); } catch (_) { /* 已自然结束 */ }
         }
     }
 
     // ---- AudioContext ----
+    /* 为什么「总是创建」而不是按 userActivation 预判：
+       浏览器对**已经授权过自动播放的站点**（localhost 常访问、Media Engagement 达标）
+       直接给 running —— 刷新后也能立刻出声、且无警告；只有从未授权过的站点才会被挂起。
+       预判（hasBeenActive / 导航类型）在刷新场景一律是 false，会把已授权站点也误杀，
+       表现就是「不报错、但一点声音都没有」。
+       因此：建了再看 state —— running 直接用；suspended 就**不主动 resume**
+       （非手势栈里的 resume 同样被拒），把手势留给 _armGestureResume。 */
     _context() {
         if (!this.context) {
             const Ctor = window.AudioContext || window.webkitAudioContext;
-            this.context = Ctor ? new Ctor() : null;
+            if (!Ctor) return null;
+            this.context = new Ctor();
+            this._armGestureResume();
         }
         return this.context;
+    }
+
+    _whenUnlocked() {
+        const ctx = this._context();
+        if (ctx && ctx.state === 'running') return Promise.resolve(ctx);
+        this._armGestureResume();
+        return new Promise((resolve) => { this._ctxWaiters.push(resolve); });
+    }
+
+    _flushWaiters(ctx) {
+        const waiters = this._ctxWaiters;
+        this._ctxWaiters = [];
+        waiters.forEach((fn) => fn(ctx));
+    }
+
+    /* 浏览器是否还要求一次手势才能出声：story 据此提示「点击画面开启语音」。 */
+    needsGesture() {
+        return this._ctxWaiters.length > 0 || !this.context || this.context.state !== 'running';
+    }
+
+    /* 首次用户手势到达时才创建/恢复 context，并放行等待中的播放请求。
+       _unlockAt 供 story 判断「这一下只用来解锁、不推进剧情」。
+       resume 被拒（这一次事件不算手势）时**不放行播放**：suspended 的 context
+       播放出来是静音的，放行等于让这一句凭空消失；留在队列里等下一次手势。 */
+    _armGestureResume() {
+        if (this._gestureResume) return;
+        this._gestureResume = () => {
+            const Ctor = window.AudioContext || window.webkitAudioContext;
+            const wasLocked = !this.context || this._ctxWaiters.length > 0 ||
+                (this.context && this.context.state === 'suspended');
+            if (!this.context && Ctor) this.context = new Ctor();
+            const ctx = this.context;
+            if (!ctx) return;
+            if (wasLocked) this._unlockAt = performance.now();
+            if (ctx.state === 'running') { this._flushWaiters(ctx); return; }
+            if (ctx.resume) {
+                ctx.resume().then(() => {
+                    if (ctx.state === 'running') this._flushWaiters(ctx);
+                }).catch(() => { /* 不是手势调用栈：保持等待，下一次手势再试 */ });
+            }
+        };
+        window.addEventListener('pointerdown', this._gestureResume, true);
+        window.addEventListener('keydown', this._gestureResume, true);
     }
 
     // ---- 解码（带缓存）----
@@ -157,19 +228,23 @@ class LipSyncPlayer {
 
     // ---- 主路径：WebAudio 解码 + 离线分析 ----
     _playWebAudio(url) {
+        const seq = this._playSeq;
         return this._getDecoded(url).then((decoded) => {
-            if (!decoded) return null;
+            if (seq !== this._playSeq || !decoded) return null;
             const ctx = this._context();
+            if (!ctx) return null;              // 还没解锁：不该走到这里，但别崩
             const source = ctx.createBufferSource();
             source.buffer = decoded;
 
             source.connect(ctx.destination);
 
             this.activeSource = source;
-            this.active = true;
             this._startLipSync(decoded);
 
-            source.onended = () => this.stop();
+            source.onended = () => {
+                if (this.activeSource !== source) return;
+                this.stop();
+            };
             source.start(0);
             return decoded;
         });
@@ -194,7 +269,8 @@ class LipSyncPlayer {
         if (ls && ls.enabled === false) return;
 
         this.timeline = this.lipsync.analyzeAudioBuffer(audioBuffer);
-        this.startTime = this._context().currentTime;
+        const ctx = this._context();
+        this.startTime = ctx ? ctx.currentTime : 0;
         this.active = true;
         if (this.rafId) cancelAnimationFrame(this.rafId);
         this.rafId = requestAnimationFrame(() => this._tick());
@@ -206,7 +282,8 @@ class LipSyncPlayer {
         if (!player) return;
 
         const ls = this.config && this.config.lipsync || {};
-        const elapsed = this._context().currentTime - this.startTime;
+        const actx = this._context();
+        const elapsed = (actx ? actx.currentTime : 0) - this.startTime;
         const lastFrame = this.timeline[this.timeline.length - 1];
 
         if (elapsed >= lastFrame.t) {
