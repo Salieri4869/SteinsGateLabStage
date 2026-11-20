@@ -1,11 +1,12 @@
 {
-  "doc": "角色绑定表。剧本只引用角色名与动作名；模型、语音目录、动作宏统一在此绑定，换造型时只改这里。model 为 character/data/ 下的「角色/文件名」；voiceDir 为相对 /steins_gate/story/ 的语音 URL 前缀；actions 的字段与 character/actions_config 的 pool 项同构（timeline / diffSlot1 / diffSlot2 / variables / duration）。",
+  "doc": "角色绑定表。剧本只引用角色名与动作名；模型、语音目录、动作宏都在这绑。model 为 character/data/ 下的「角色/文件名」；voiceDir 为语音 URL 前缀；actions 字段同 actions_config 的 pool。blink 为角色级眨眼（on 缺省开、closeValue 缺省 10）：节奏用 wasm 自带自动眨眼，这里只驱动眼皮 face_eye_open_l/r；动作里 \"blink\": false 可单关。",
   "红莉栖": {
     "model": "牧瀬紅莉栖/牧瀬紅莉栖ab_白衣.psb.m.pure.zip",
     "voiceDir": "../../character/sounds/krs/",
     "actions": {
       "平常": {
-        "timeline": "表情_普通"
+        "timeline": "表情_普通",
+        "diffSlot1": "腕差分B"
       },
       "惊讶": {
         "timeline": "表情_驚き00",
@@ -24,8 +25,6 @@
       },
       "吃惊": {
         "timeline": "表情_驚き00",
-        "diffSlot1": "疑問",
-        "diffSlot2": "疑問_固定",
         "variables": [
           {
             "name": "head_UD",
@@ -71,17 +70,18 @@
           },
           {
             "name": "face_eye_open_l",
-            "value": 0,
-            "duration": 0,
+            "value": -5,
+            "duration": 1000,
             "delay": 0
           },
           {
             "name": "face_eye_open_r",
-            "value": 0,
-            "duration": 0,
+            "value": -5,
+            "duration": 100,
             "delay": 0
           }
-        ]
+        ],
+        "diffSlot1": "疑問"
       }
     }
   },
@@ -166,6 +166,7 @@
         "timeline": "表情_困る02",
         "diffSlot1": "ためいき"
       }
-    }
+    },
+    "voiceDir": "../../character/sounds/suz/"
   }
 }

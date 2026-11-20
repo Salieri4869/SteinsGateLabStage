@@ -312,7 +312,8 @@ function validateStory(kind, data) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('必须是 JSON 对象');
     if (kind === 'cast') {
         for (const [role, entry] of Object.entries(data)) {
-            if (role === 'doc') continue;
+            // doc 是说明字段；下划线开头的是全局设置（_blink），都不是角色
+            if (role === 'doc' || role.charAt(0) === '_') continue;
             if (!entry || typeof entry !== 'object') {
                 throw new Error('角色「' + role + '」须为对象');
             }

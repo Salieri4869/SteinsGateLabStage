@@ -52,6 +52,7 @@
         sel: 0, typing: false, typeTimer: null, autoTimer: null,
         // autoOn 是播放界面的总开关（对话框右下角 AUTO），与台词无关
         autoOn: false, autoReady: false, lineVoice: null,
+        introPending: false,   // 开场动画还没放完、首句尚未落字：此时 AUTO 不许抢跑
         typeDone: null, seq: 0, lineStart: 0,
         bg: null, models: null, voices: {},
         soundFolders: [], soundFiles: {},
@@ -72,6 +73,35 @@
     // 与 stage 的 DEFAULT_FADE_TIME 保持一致，避免 0 导致瞬间跳变。
     var DEFAULT_VAR_DURATION = 300;
 
+    /* 眨眼：只做「跟随 + 补眼皮」，节奏全交给 wasm 自带的自动眨眼。
+       实测（2026-11-20）：
+         · SDK 每 1.3–3s 以 10 帧一组的曲线把 face_eye_open 从**基线**抬到 10 再落回基线
+           （基线不一定是 0：表情会把它抬高，鈴羽「生气」=2、紅莉栖「吃惊」=8），
+           红莉栖和鈴羽**都会**被推（此前「鈴羽不动」是测在 hide=true 上，假象）。
+         · 这一路只驱动单数 face_eye_open（眼内阴影/瞳线/高光）；
+           真正闭眼的是 face_eye_open_l / _r（左右眼睑线，0 睁 / 10 閉じ / 55 全闭）。
+       实现用 setVariableDiff（module = BLINK_MODULE）：diff 叠加在「当前基准」上，
+       所以动作 variables 正在渐变、dev panel 手动调表情这两个写入方都不用避让，
+       停手时把 diff 写回 0，当前基准自己就露出来了，不需要快照、也不需要还原 base。
+         · 唯一纪律：diff 常驻、没有 remove 接口 → 每个退出路径都必须显式写 0
+           （stopBlink / 动作换掉眼皮变量 / 关闭眨眼），漏一处就永久带偏移量。
+         · 绝不与 setVariable 混写同一个 label：两者相加，会重复计入。
+       gate 只回答「这个动作结束时眼皮本来闭着吗」，用作模型未就绪时的兜底；
+       数值计算一律读实时基准。眼皮本来就已经闭着（基准 ≥ closeValue，如 閉じ / 笑閉じ）
+       就不跟，等于自然不眨。 */
+    var DEFAULT_BLINK = {
+        closeValue: 10      // 满闭值：閉じ = 10（frameList：0 睁 / 5 半闭 / 10 全闭 / 20 笑闭）
+    };
+    var BLINK_KEYS = ['closeValue'];
+    var BLINK_MODULE = 'blink';                              // diff 的 module 名：读写必须一致
+    var BLINK_TRACK = 'face_eye_open';                       // SDK 自动眨眼驱动的那个变量
+    var BLINK_VARS = ['face_eye_open_l', 'face_eye_open_r']; // 眼皮线那一对
+    var BLINK_FULL = 10;            // track 抬到 10 视为完全闭上（模型 frameList 的「閉じ」）
+    var BLINK_EPS = 0.05;           // diff 变化小于这个值就不写，避免逐帧抖动
+    var BLINK_TOP_MS = 250;         // 顶着满闭超过这个时长 → 不是眨眼，是动作把 track 压住了；同时兼作快变后的「不认漂移」静默期
+    var BLINK_DRIFT_RATE = 0.015;   // 位移慢于这个速率(单位/ms)=表情渐变,算基线漂移,不算眨眼
+    var BLINK_MIN_SPAN = 1.2;       // 基线离满闭不到这么多 → 没有可眨的行程，不补 diff
+
     function $(id) { return document.getElementById(id); }
     function apiUrl(name) {
         return '/api/story' + (name ? '?name=' + encodeURIComponent(name) : '');
@@ -85,7 +115,9 @@
         }
     }
     function firstRole(cast) {
-        return Object.keys(cast || {}).filter(function (k) { return k !== 'doc'; })[0] || '';
+        return Object.keys(cast || {}).filter(function (k) {
+            return k !== 'doc' && k.charAt(0) !== '_';
+        })[0] || '';
     }
     function modelOf(scene, cast) {
         var role = (scene.lines && scene.lines[0] && scene.lines[0].role) || firstRole(cast);
@@ -303,6 +335,237 @@
             if (!v || !v.name) return;
             player.setVariable(v.name, v.value, Number.isFinite(v.duration) ? v.duration : base);
         });
+        startBlink(act, role);
+    }
+
+    /* ---------- 眨眼 ----------
+       节奏不排：wasm 自带的自动眨眼每 1.3–3s 把 face_eye_open 沿 10 帧曲线从基线抬到
+       10 再落回基线，红莉栖和鈴羽都会（此前「鈴羽不动」是测在 hide=true 上，假象）。
+       这一路只驱动单数变量（眼内阴影 / 瞳线 / 高光），真正闭眼的是
+       face_eye_open_l / _r。所以这里每帧跟随一次，用 diff 只写「增量」：
+           k    = (track - 基线) / (10 - 基线)
+           diff = (closeValue - 眼皮基准) * k
+       基数是 wasm 自己维护的，我们既不读也不改，所以动作 variables 正在渐变、
+       dev panel 手动调表情都不会被我们拍平；track 落回基线时 diff 写成 0 就收手。 */
+    var blinkPool = {};        // role -> { cfg, sig, track, vars, gate, last, trBase, lastV, lastT, fastUntil, topAt }
+    var blinkRaf = null;
+
+    /* 角色级缺省：cast.json 里该角色的 blink。不写＝默认开。 */
+    function blinkRole(role) {
+        var r = (state.cast && state.cast[role]) || {};
+        var g = (r.blink && typeof r.blink === 'object') ? r.blink : {};
+        var out = { on: g.on !== false };
+        BLINK_KEYS.forEach(function (k) {
+            var v = Number(g[k]);
+            out[k] = Number.isFinite(v) ? v : DEFAULT_BLINK[k];
+        });
+        if (typeof g.vars === 'string' && g.vars) out.vars = g.vars;
+        if (typeof g.track === 'string' && g.track) out.track = g.track;
+        return out;
+    }
+    /* 动作级三态：false=不眨；缺省=跟随角色；对象=逐字段覆盖角色 */
+    function blinkCfgFor(act, role) {
+        var g = blinkRole(role);
+        var a = act && act.blink;
+        if (a === false) return null;
+        var own = (a && typeof a === 'object') ? a : (a === true ? {} : null);
+        if (!g.on && !own) return null;          // 角色关掉、动作也没单独开 → 不眨
+        if (!own) return g;
+        var out = {};
+        BLINK_KEYS.forEach(function (k) {
+            var v = Number(own[k]);
+            out[k] = Number.isFinite(v) ? v : g[k];
+        });
+        out.on = true;
+        ['vars', 'track'].forEach(function (k) {
+            if (own[k]) out[k] = own[k];
+            else if (g[k]) out[k] = g[k];
+        });
+        return out;
+    }
+
+    function blinkNum(cfg, key) {
+        var v = Number(cfg && cfg[key]);
+        return Number.isFinite(v) ? v : DEFAULT_BLINK[key];
+    }
+    /* 属性区那一行摘要：跟随 SDK · 眼皮10 */
+    function blinkSummary(cfg) {
+        return (cfg && cfg.on === false ? '不眨' : '自动眨') +
+            ' · 眼皮 ' + blinkNum(cfg, 'closeValue');
+    }
+    /* 补眼皮推哪两个变量：显式 vars 优先，否则默认左右眼睑线 */
+    function blinkVars(cfg) {
+        var raw = cfg && cfg.vars;
+        if (typeof raw === 'string') {
+            var list = raw.split(/[,;\s]+/).filter(Boolean);
+            if (list.length) return list;
+        } else if (raw && raw.length) {
+            return Array.prototype.slice.call(raw).filter(Boolean);
+        }
+        return BLINK_VARS.slice();
+    }
+    /* 这个模型真的声明了哪些眼皮变量（没声明的写了 wasm 也不认） */
+    function blinkRealVars(role, vars) {
+        var p = playerOf(role);
+        var labels = [];
+        try { labels = (p.variableList || []).map(function (v) { return v.label || v.name || v; }); } catch (_) { }
+        if (!labels.length) return vars;
+        return vars.filter(function (n) { return labels.indexOf(n) >= 0; });
+    }
+    /* 眼皮基准的「决策快照」：只回答一个问题——这个动作结束时眼皮本来就闭着吗。
+       优先 act.variables 的目标值；该动作没写这个变量就沿用上次的判断；
+       首次上场才读一次当前值。这个值不参与任何数值计算，读偏了最多多眨/少眨一次。 */
+    function blinkGateOf(role, act, vars, prev) {
+        var fromAct = {};
+        ((act && act.variables) || []).forEach(function (v) {
+            if (v && v.name) fromAct[v.name] = Number(v.value);
+        });
+        var p = playerOf(role), out = {};
+        vars.forEach(function (n) {
+            var v = fromAct[n];
+            if (!Number.isFinite(v) && prev) v = prev[n];
+            if (!Number.isFinite(v) && p) v = Number(p.getVariable(n));
+            out[n] = Number.isFinite(v) ? v : 0;
+        });
+        return out;
+    }
+
+    /* 把这一路 diff 归零：diff 是常驻叠加，没有 remove 接口，
+       必须显式写 0 才能把「当前基准」露出来。写 0 本身是幂等的，重复调用无害。 */
+    function blinkClear(role, b) {
+        var p = playerOf(role);
+        b = b || blinkPool[role];
+        if (!p || !b) return;
+        b.vars.forEach(function (n) {
+            try { p.setVariableDiff(BLINK_MODULE, n, 0, 0); } catch (_) { /* 变量不在这个模型里 */ }
+        });
+        b.last = {};
+    }
+    function stopBlink(role) {
+        var b = blinkPool[role];
+        if (!b) return;
+        blinkClear(role, b);
+        delete blinkPool[role];
+        if (!Object.keys(blinkPool).length && blinkRaf !== null) {
+            cancelAnimationFrame(blinkRaf);
+            blinkRaf = null;
+        }
+    }
+    function stopAllBlinks() {
+        Object.keys(blinkPool).forEach(function (r) { stopBlink(r); });
+    }
+    /* 全员起眨眼：不等某句台词才生效，不开口的角色也要眨 */
+    function startSceneBlinks() {
+        state.stage.forEach(function (s) { startBlink(null, s.role); });
+    }
+
+    /* 一帧：只跟随，不排任何定时器。v 是 SDK 当前推到的值（0..10）。
+       写的永远是「增量」：睁着 → 0（幂等于不干预），眨 → 补到满闭还差的那一段。
+       diff 由 wasm 叠加在当前基准上，所以动作 variables 的渐变不会被我们拍平。
+
+       **为什么要「相对基线」而不是 v / 10**：face_eye_open 不是只有 SDK 在写，
+       动作/表情也会把它推到一个新的静止值，而且就停在那儿：
+         红莉栖「吃惊」= 8、铃羽「生气」= 2、铃羽「摇头」(困る01) 直接顶到 10。
+       拿绝对值当比例的话：
+         · 吃惊时 k 常驻 0.8 → 眼皮平时就半闭，眨眼只剩 8→10 这 2 个单位 = 「只眨一点点」；
+         · 摇头时 track 顶在 10 不动 → k 恒为 1 → diff 恒为 close → 一直闭着眼，
+           而且 diff 是常驻的，下一句、重播都还带着它（「SERN在2036年」也闭眼就是这么来的）。
+       所以这里维护一条「静止基线」trBase：只有相对基线的抬升才算眨眼，
+       顶在满闭超过 BLINK_TOP_MS 还不落 = 动作把眼睛压住了，改认作基线（不再叠加）。
+
+       **补多少**：眼皮基准不是 0（吃惊 -5 / 生气 4），直接 +close 会闭不满或闭过头
+       （生气 4+10=14 早就越界）。按「补到 close 还差多少」算：
+           眼皮 = 基准 + (close - 基准) * k
+       k=1 时正好落在 close（全闭），k=0 时 diff=0（露出表情原本的睁眼度）。 */
+    function blinkStep(role) {
+        var b = blinkPool[role];
+        var p = playerOf(role);
+        if (!b || !p) return;
+        // 隐藏时 wasm 直接丢弃写入：此时 last 与画面上的实际 diff 仍然一致
+        // （丢弃＝没改），所以什么都不用做，露出来后差值自会补齐。
+        if (p.hide) return;
+        // 调试/验收：window.ST_BLINK_FREEZE = true 时停在当前状态，便于截图确认
+        if (window.ST_BLINK_FREEZE) return;
+        var v = Number(p.getVariable(b.track));
+        if (!Number.isFinite(v)) return;  // 模型没这个变量 → 没有节奏可跟
+
+        // 基线 trBase：SDK 眨眼是「基线 → 10 → 基线」，只有相对基线的抬升才算眨眼。
+        var now = performance.now();
+        if (!Number.isFinite(b.trBase)) { b.trBase = v; b.lastV = v; b.lastT = now; b.topAt = 0; }
+        // 变化速率（单位/毫秒）：区分「表情渐变」和「眨眼」最稳的判据，而且与帧率无关。
+        //   表情渐变：吃惊 0→8 用 1000ms ≈ 0.008/ms
+        //   眨眼：SDK 约 80ms 从基线抬到 10 ≈ 0.1/ms（跨度小的（基线 8）也有 0.025/ms 以上）
+        var dt = Math.max(1, now - (b.lastT || now));
+        var rate = Math.abs(v - b.lastV) / dt;
+        b.lastT = now;
+        // 快变的这段时间不认漂移：否则眨眼顶到峰值稍有停顿（rate≈0）就会把峰值当成基线，
+        // k 立刻掉到 0，眼睛「睁一下又闭」地闪。
+        if (rate >= BLINK_DRIFT_RATE) b.fastUntil = now + BLINK_TOP_MS;
+        // 慢变跟随：不快的位移直接算基线漂移，否则渐变那一秒会被当成「抬到 8」→ k=1 → 闭一下
+        if (rate < BLINK_DRIFT_RATE && now > (b.fastUntil || 0)) b.trBase = v;
+        b.lastV = v;
+        // 顶在满闭不落（> BLINK_TOP_MS）：不是眨眼，是动作/表情把 track 压死了
+        if (v >= BLINK_FULL - 0.6) {
+            if (!b.topAt) b.topAt = now;
+            else if (now - b.topAt > BLINK_TOP_MS) { b.trBase = v; b.topAt = 0; }
+        } else {
+            b.topAt = 0;
+        }
+        // 掉到基线下方一大截：基线过期了（上一句留下的），直接跟下去
+        if (v < b.trBase - 1) { b.trBase = v; b.topAt = 0; }
+
+        var span = BLINK_FULL - b.trBase;
+        var k = span < BLINK_MIN_SPAN ? 0 : Math.max(0, Math.min(1, (v - b.trBase) / span));
+        var close = blinkNum(b.cfg, 'closeValue');
+        b.vars.forEach(function (n) {
+            // 基准取「实时值」：动作换掉之后 wasm 里真正躺着的那一个。
+            // gate 只是模型还没就绪时的兜底（决策快照会过期，例如重播后还带着上一句的 4）。
+            var base = Number(p.getVariable(n));
+            if (!Number.isFinite(base)) base = Number(b.gate[n]);
+            if (!Number.isFinite(base)) base = 0;
+            var target = (k <= 0.02 || base >= close) ? 0 : (close - base) * k;
+            if (Math.abs((b.last[n] || 0) - target) < BLINK_EPS) return;
+            try { p.setVariableDiff(BLINK_MODULE, n, target, 0); } catch (_) { return; }
+            b.last[n] = target;
+        });
+    }
+
+    function blinkFrame() {
+        blinkRaf = null;
+        Object.keys(blinkPool).forEach(blinkStep);
+        if (Object.keys(blinkPool).length) blinkRaf = requestAnimationFrame(blinkFrame);
+    }
+
+    function startBlink(act, role) {
+        var cfg = blinkCfgFor(act, role);
+        if (!cfg) { stopBlink(role); return; }
+        var p = playerOf(role);
+        if (!p || typeof p.setVariableDiff !== 'function') return;
+        var vars = blinkRealVars(role, blinkVars(cfg));
+        if (!vars.length) { stopBlink(role); return; }   // 新模型没有眼皮变量：先把旧 diff 清掉
+        var cur = blinkPool[role];
+        var gate = blinkGateOf(role, act, vars, cur && cur.gate);
+        var sig = JSON.stringify(cfg) + '|' + JSON.stringify(gate);
+        if (cur && cur.sig === sig) return;      // 同一套配置与基准，别重排
+        // 换动作时 diff 要连同「已写出去的值」一起带过去：last 是账本，
+        // 丢了它就会以为画面上是 0，该归零的时候反而不写。
+        var last = (cur && cur.last) || {};
+        blinkPool[role] = {
+            cfg: cfg, sig: sig, last: last,
+            track: cfg.track || BLINK_TRACK,
+            vars: vars,
+            gate: gate,
+            // 换了动作就重新认基线：新表情/动作会把 face_eye_open 拉到它自己的静止值
+            trBase: NaN, lastV: NaN, lastT: 0, fastUntil: 0, topAt: 0
+        };
+        if (cur && cur.vars) {                   // 旧动作盯的变量不在新列表里：先把它们归零
+            cur.vars.forEach(function (n) {
+                if (vars.indexOf(n) >= 0) return;
+                try { p.setVariableDiff(BLINK_MODULE, n, 0, 0); } catch (_) { }
+                delete last[n];
+            });
+        }
+        if (blinkRaf === null) blinkRaf = requestAnimationFrame(blinkFrame);
     }
     function applyVisible(slot, visible) {
         var p = playerOf(slot.role);
@@ -425,6 +688,7 @@
             applyMoveToSlots(list[i].move);
         }
         syncLayout();
+        startSceneBlinks();     // 站位一定下来就给全员起眨眼，不等谁开口
     }
     async function getJson(name) {
         var r = await fetch(apiUrl(name), { cache: 'no-store' });
@@ -515,6 +779,16 @@
     }
 
     function setHint(text) { $('st-hint').textContent = text; }
+    /* 有无播放器还在等首次手势才能出声（浏览器自动播放策略）。
+       有语音的那一句会 pending，AUTO 因此停在首句 —— 此时要提示用户点一下，
+       否则看起来像「AUTO 开了却不说话」。 */
+    function audioNeedsGesture() {
+        var wanted = false;
+        Object.keys(audioPool).forEach(function (r) {
+            if (audioPool[r].needsGesture && audioPool[r].needsGesture()) wanted = true;
+        });
+        return wanted;
+    }
     function setProgress() {
         var total = lines().length;
         var at = state.ended ? total : state.idx + 1;
@@ -548,6 +822,7 @@
         }).catch(function () { return 0; });
     }
 
+    /* 按固定速度打字；语音各走各的播放器，不必互相等待 */
     function typeText(text, done) {
         var el = $('st-text');
         el.textContent = '';
@@ -590,17 +865,25 @@
        打字还没完就先不动，补全后 onTyped 会再调一次。 */
     function armAuto(voiceMs) {
         if (state.autoTimer) { clearTimeout(state.autoTimer); state.autoTimer = null; }
-        if (state.mode !== 'play') return;
-        if (!state.autoOn) { setHint(state.ended ? '点击重新开始' : '点击继续 ▸'); return; }
+        if (state.mode !== 'play' || state.introPending) return;
+        if (!state.autoOn) {
+            setHint(audioNeedsGesture() ? '点击画面开启语音 ▸' : (state.ended ? '点击重新开始' : '点击继续 ▸'));
+            return;
+        }
         if (state.ended) { setHint('点击重新开始'); return; }
         if (state.typing) return;
         var line = currentLine();
         if (!line) return;
         var mySeq = state.seq;
         var wait = Math.max(0, Number(line.wait) || 0);
-        setHint('自动推进中 · 点击立即继续');
-        Promise.resolve(voiceMs || 0).then(function (ms) {
+        var needGesture = audioNeedsGesture();
+        setHint(needGesture ? '点击画面开启语音 · 之后自动播放 ▸' : '自动推进中 · 点击立即继续');
+        // 无手势时语音 Promise 永久 pending：别让它把 AUTO 卡死，按默认间隔推进；
+        // 有手势时等 speaking 角色语音播完（ms）再推进，保持音画同步。
+        var waitVoice = needGesture ? Promise.resolve(0) : Promise.resolve(voiceMs || 0);
+        waitVoice.then(function (ms) {
             if (mySeq !== state.seq || !state.autoOn || state.mode !== 'play') return;
+            if (!audioNeedsGesture()) setHint('自动推进中 · 点击立即继续');
             var elapsed = performance.now() - state.lineStart;
             var delay = ms > 0
                 ? Math.max(0, ms - elapsed) + wait
@@ -658,6 +941,7 @@
 
     function showEnd() {
         clearTimers();
+        stopAllBlinks();
         state.ended = true;
         state.typing = false;
         $('st-text').textContent = '— 完 —';
@@ -672,6 +956,28 @@
         renderLine(0);
     }
 
+    /* 只把一行的舞台落到画面：背景、上/下场、站位、动作表情。
+       与台词（名牌/打字/语音）分开，开场时先铺好它，等对话框动画结束再出词。
+       全是幂等落值：动画前铺一次、renderLine 里再走一次不会叠加。 */
+    function applyLineStage(line, animate) {
+        applyStageEvents(line);
+        applyMoves(line, animate);
+        applyBackground(line.background || (state.scene && state.scene.background));
+        cueRoles(line).forEach(function (r) {
+            var cue = cueOf(line, r);
+            if (cue.action) applyAction(cue.action, r);
+        });
+    }
+
+    /* 对话框擦入动画开始前，先把首句的背景、登场角色、动作铺到画面上。
+       模型此时已加载完，动画期间用户看到的是完整场景，只差台词。 */
+    function primeStageForIntro() {
+        var first = lines()[0];
+        if (!first) return;
+        rebuildStaging(-1);          // 编辑态可能预览过别处，先复位到开场站位
+        applyLineStage(first, false);
+    }
+
     function renderLine(i) {
         var list = lines();
         if (i >= list.length) { showEnd(); return; }
@@ -684,24 +990,20 @@
         var line = list[state.idx];
         var role = speakerOf(line);
 
-        // 本行的上/下场、站位事件；说话者决定名字与台词
-        applyStageEvents(line);
-        applyMoves(line, state.mode === 'play' && state.idx > 0);
+        applyLineStage(line, state.mode === 'play' && state.idx > 0);
         state.speaker = role;
         var shownName = displayNameAt(state.idx);
         $('st-name').textContent = shownName;
         $('st-name').classList.toggle('is-alias', shownName !== castName(role));   // 用的是别名/未知名时淡一点
         if (window.SGDialog) window.SGDialog.setName(shownName);   // 名牌按名字长度选档并重擦
-        applyBackground(line.background || (state.scene && state.scene.background));
         setProgress();
         setHint(state.autoOn && state.mode === 'play' ? '自动推进中…' : '');
 
-        // 逐角色演出：同台每人一份 action / voice，各走各的播放器与口型
+        // 逐角色演出：语音各走各的播放器与口型；动作已在 applyLineStage 里落过
         var token = state.voiceSeq;    // stopVoices 刚推进过，这句的语音只认这个令牌
         var speakerVoice = Promise.resolve(0);
         cueRoles(line).forEach(function (r) {
             var cue = cueOf(line, r);
-            if (cue.action) applyAction(cue.action, r);
             if (cue.voice) {
                 var p = playVoiceFor(r, cue.voice, token);
                 if (r === role) speakerVoice = p;      // 自动推进只等说话者的语音
@@ -713,9 +1015,11 @@
         typeText(line.text || '', function () { onTyped(line, speakerVoice); });
     }
 
-    /* 前进一步：打字中先补全，否则下一行 / 结束 / 重播 */
+    /* 前进一步：打字中先补全，否则下一行 / 结束 / 重播。
+       推进时当前语音还在播就直接掐掉、播下一句的——这正是点击推进的语义。 */
     function step() {
         if (state.mode !== 'play') return;
+        if (state.introPending) return;   // 开场动画还在铺：这一下不抢台词
         if (skipTyping()) return;
         if (state.ended) { restart(); return; }
         if (state.idx + 1 >= lines().length) { showEnd(); return; }
@@ -1112,7 +1416,7 @@
         var eff = effectiveStage();
 
         if (!state.baseStage.length) {
-            box.textContent = '（这一场还没有角色：先在 cast.json 绑定模型，再点「添加角色」）';
+            box.textContent = '（这一场还没有角色：先在角色表里给角色绑定模型，再点「添加角色」）';
             return;
         }
         state.baseStage.forEach(function (slot, i) {
@@ -1488,9 +1792,51 @@
     //  和剧本共用顶栏那一枚「保存」（saveCurrent 会把两个文件一起写盘）。
     // ============================================================
 
-    /* 角色表的键：包含所有条目（连没绑模型的），但排除说明字段 doc */
+    /* 角色表里真正的角色键：排除说明字段 doc 与下划线开头的内部键 */
     function castKeys() {
-        return Object.keys(state.cast || {}).filter(function (k) { return k !== 'doc'; });
+        return Object.keys(state.cast || {}).filter(function (k) {
+            return k !== 'doc' && k.charAt(0) !== '_';
+        });
+    }
+
+    /* 动作宏列顶部的眨眼条：读写「当前选中角色」的 blink，缺省即开 */
+    function syncBlinkRole() {
+        var role = state.castSel;
+        var g = (state.cast && state.cast[role] && state.cast[role].blink) || {};
+        var on = g.on !== false;
+        var chk = $('st-blink-default');
+        if (chk) chk.checked = on;
+        var box = document.querySelector('.st-blink-global');
+        if (box) box.classList.toggle('is-off', !on);
+        BLINK_KEYS.forEach(function (k) {
+            var el = $('st-blink-g-' + k);
+            if (!el) return;
+            var v = Number(g[k]);
+            if (!Number.isFinite(v)) v = DEFAULT_BLINK[k];
+            el.value = String(v);
+        });
+    }
+
+    function onBlinkGlobalChange(evt) {
+        var t = evt.target;
+        if (!t || !t.id) return;
+        var role = state.castSel;
+        var entry = state.cast && state.cast[role];
+        if (!entry) return;
+        var g = (entry.blink && typeof entry.blink === 'object') ? entry.blink : (entry.blink = {});
+        if (t.id === 'st-blink-default') {
+            if (t.checked) { delete g.on; if (!Object.keys(g).length) delete entry.blink; }
+            else g.on = false;                    // 缺省即开，只在关掉时落 false
+        } else if (t.id.indexOf('st-blink-g-') === 0) {
+            var key = t.id.slice('st-blink-g-'.length);
+            var n = Number(t.value);
+            if (t.value === '' || !Number.isFinite(n)) delete g[key];
+            else g[key] = Math.max(0, n);
+        } else return;
+        if (entry.blink && !Object.keys(entry.blink).length) delete entry.blink;
+        syncBlinkRole();
+        markStale();
+        renderDrawer();      // 动作摘要与参数 placeholder 跟着变
     }
 
     /* 两个页签：剧本 / 角色表。切页只改显示，不重建剧本列表，
@@ -1512,6 +1858,7 @@
                 state.castSel = keys.indexOf(spk) >= 0 ? spk : (keys[0] || '');
             }
             state.castAct = null;
+            syncBlinkRole();
             renderDrawer();
         } else {
             $('st-cast-role-new').hidden = true;
@@ -1695,17 +2042,17 @@
         var a = (((state.cast[role] || {}).actions || {})[actName]) || {};
 
         // 动作宏名（可改，剧本里引用同步迁移）
-        wrap.appendChild(edField('宏名（剧本 action 字段引用）', edInput('text', actName, 'act-key', '改名会同步更新剧本引用')));
+        wrap.appendChild(edField('宏名（台词里用它来触发）', edInput('text', actName, 'act-key', '改名会同步更新剧本引用')));
 
         var mains = optionsFor(role, 'mainTimelineLabels');
         var diffs = optionsFor(role, 'diffTimelineLabels');
-        wrap.appendChild(edSelectField('主时间线 timeline', 'timeline', a.timeline || '', mains));
-        wrap.appendChild(edSelectField('差分槽 1 diffSlot1', 'diffSlot1', a.diffSlot1 || '', diffs));
-        wrap.appendChild(edSelectField('差分槽 2 diffSlot2', 'diffSlot2', a.diffSlot2 || '', diffs));
+        wrap.appendChild(edSelectField('主时间线', 'timeline', a.timeline || '', mains));
+        wrap.appendChild(edSelectField('差分槽 1', 'diffSlot1', a.diffSlot1 || '', diffs));
+        wrap.appendChild(edSelectField('差分槽 2', 'diffSlot2', a.diffSlot2 || '', diffs));
 
         var durRow = document.createElement('label');
         durRow.className = 'st-field';
-        durRow.appendChild(edSpan('保持时长 duration（ms，留空＝默认）'));
+        durRow.appendChild(edSpan('保持时长（ms，留空＝默认）'));
         durRow.appendChild(edInput('number', a.duration != null ? String(a.duration) : '', 'duration', '1000'));
         wrap.appendChild(durRow);
 
@@ -1724,7 +2071,7 @@
         vPaste.type = 'button'; vPaste.id = 'st-cast-var-paste';
         vPaste.className = 'st-var-tool';
         vPaste.textContent = '粘贴导入';
-        vPaste.title = '粘贴 stage 控制台「复制参数」得到的 JSON，批量追加为变量';
+        vPaste.title = '把舞台页「变量微调」里复制的内容粘贴进来，一次添加多个变量';
         vOps.appendChild(vPaste);
         vHead.appendChild(vOps);
         wrap.appendChild(vHead);
@@ -1749,7 +2096,7 @@
         pastePanel.hidden = true;
         var pasteTip = document.createElement('div');
         pasteTip.className = 'st-var-paste-tip';
-        pasteTip.textContent = '粘贴 stage「复制参数」的 JSON 数组，点「导入」追加到下方变量（Ctrl+Enter 快速导入）。';
+        pasteTip.textContent = '把舞台页「变量微调」里复制的内容粘贴到这里，点「导入」即可追加到下方变量（Ctrl+Enter 快速导入）。';
         pastePanel.appendChild(pasteTip);
         var pasteText = document.createElement('textarea');
         pasteText.id = 'st-cast-var-paste-text';
@@ -1771,6 +2118,57 @@
         pastePanel.appendChild(pasteOps);
         wrap.appendChild(pastePanel);
 
+        // ---- 眨眼 blink（一行三态 + 摘要，参数折叠在后面）----
+        var bHead = document.createElement('div');
+        bHead.className = 'st-sub';
+        bHead.innerHTML = '<h4>眨眼 blink</h4>';
+        wrap.appendChild(bHead);
+
+        var gcfg = blinkRole(role);
+        var bModeVal = (a.blink === false) ? 'off'
+            : (a.blink && typeof a.blink === 'object') ? 'on'
+                : (a.blink === true) ? 'on' : '';
+        var eff = blinkCfgFor(a, role);              // 实际生效的配置；null = 不眨
+        var own = (a.blink && typeof a.blink === 'object') ? a.blink : {};
+
+        var bRow = document.createElement('div');
+        bRow.className = 'st-blink-row';
+        var bMode = document.createElement('select');
+        bMode.dataset.key = 'blink-mode';
+        [['', '继承角色（' + (gcfg.on ? '眨' : '不眨') + '）'], ['on', '强制开'], ['off', '强制关']]
+            .forEach(function (o) {
+                var op = document.createElement('option');
+                op.value = o[0]; op.textContent = o[1]; bMode.appendChild(op);
+            });
+        bMode.value = bModeVal;
+        bRow.appendChild(bMode);
+
+        var bSum = document.createElement('span');
+        bSum.className = 'st-blink-sum';
+        bSum.textContent = eff ? blinkSummary(eff) : '不眨';
+        bSum.title = eff ? blinkSummary(eff) : '这个动作不眨眼';
+        bRow.appendChild(bSum);
+
+        wrap.appendChild(bRow);
+
+        var bGrid = document.createElement('div');
+        bGrid.className = 'st-blink-grid';
+
+        var lab = document.createElement('label');
+        lab.textContent = '眼皮';
+        lab.title = '完全闭上时眼皮的值，默认 10（就是模型里的 閉じ）';
+        var input = edInput('number', own.closeValue != null ? String(own.closeValue) : '',
+            'blink-closeValue', String(blinkNum(eff, 'closeValue')));
+        input.disabled = !eff;
+        lab.appendChild(input);
+        bGrid.appendChild(lab);
+        wrap.appendChild(bGrid);
+        wrap.appendChild(edHint('眨眼不用手动排节奏：角色会自己眨，大约每 1–3 秒一次。' +
+            '这里只需要填「完全闭上时眼皮的值」，默认 10，也就是模型里的 閉じ。' +
+            '换表情、切动作时眼睛会自然过渡，不会卡住；' +
+            '如果这个动作本来就是闭眼表情（閉じ / 笑閉じ），会自动跳过，不会强行再眨一下。'
+        ));
+
         var varNames = (playerOf(role) && playerOf(role).variableList || [])
             .map(function (v) { return v.label || v.name || v; });
         var dl = document.createElement('datalist');
@@ -1780,7 +2178,8 @@
         });
         wrap.appendChild(dl);
 
-        wrap.appendChild(edHint('变量名可从模型自带列表里选，也能直接输入。值 / 时长 / 延迟单位分别为 数值 / ms / ms。stage 控制台「变量微调」里调好后点「复制参数」，回到这里点「粘贴导入」即可批量导入。'));
+        wrap.appendChild(edHint('变量名可以从列表里选，也能直接输入。值填数字，时长和延迟填毫秒（ms）。' +
+            '想省事的话：先在舞台页控制台的「变量微调」里调好，点「复制参数」，再回到这里点「粘贴导入」，一次就能全部带进来。'));
     }
 
     function renderCastVars(box, role, vars) {
@@ -1929,7 +2328,7 @@
             return;
         }
         var role = speakerOf(line);
-        fillSelect($('st-role'), Object.keys(state.cast || {}).filter(function (k) { return k !== 'doc'; }),
+        fillSelect($('st-role'), castKeys(),
             role, '', roleLabel);
         setVal($('st-line-text'), line.text || '');
         renderNameField(line);
@@ -2041,10 +2440,10 @@
        不重播的话 HUD 会直接以「已铺开」的终态出现——切剧本、编辑↔播放来回切都看不到动画，
        看起来就像「这次没加载」。open() 内部从第 0 帧起跑，会先撤掉 is-open，
        所以 AUTO 提示牌的滑入也一并重来。 */
-    function playDialogIntro() {
-        if (!state.dialog) return;
+    function playDialogIntro(done) {
+        if (!state.dialog) { if (done) done(); return; }
         state.dialog.fit();       // 视口可能变过（全屏/缩放），先按当前尺寸摆好
-        state.dialog.open();
+        state.dialog.open(done);
     }
 
     function setMode(mode) {
@@ -2056,6 +2455,7 @@
             buttons[i].classList.toggle('is-active', buttons[i].getAttribute('data-mode') === mode);
         }
         if (mode === 'edit') {
+            stopAllBlinks();          // 编辑态预览别的动作，别让上一句的眨眼继续跑
             if (state.autoTimer) { clearTimeout(state.autoTimer); state.autoTimer = null; }
             skipTyping();
             setHint('');
@@ -2065,8 +2465,17 @@
         } else if (state.stale) {
             state.stale = false;
             refreshLiveRoles();
-            playDialogIntro();
-            restart();
+            primeStageForIntro();       // 动画期间先看到新剧本的完整场景
+            state.introPending = true;
+            var introDone = false;
+            var finishIntro = function () {
+                if (introDone) return;
+                introDone = true;
+                state.introPending = false;
+                restart();
+            };
+            playDialogIntro(finishIntro);
+            setTimeout(finishIntro, 2000);
         } else {
             // 编辑模式可能预览过别的站位，回放前按当前播放行复位
             rebuildStaging(state.ended ? lines().length - 1 : state.idx);
@@ -2121,11 +2530,21 @@
             state.file = file;
             state.scene = scene;
             applyScene(scene, state.cast);
+            stopAllBlinks();          // 换场＝换一套站位与动作，旧眨眼表作废
             stopVoices();
             if (state.mode === 'play') {
                 state.stale = false;
-                playDialogIntro();      // 换剧本＝换一场戏，对话框重新铺一次
-                restart();
+                primeStageForIntro();       // 动画期间先看到新剧本的完整场景
+                state.introPending = true;
+                var introDone = false;
+                var finish = function () {
+                    if (introDone) return;
+                    introDone = true;
+                    state.introPending = false;
+                    restart();
+                };
+                playDialogIntro(finish);      // 换剧本＝换一场戏：动画铺开后才落台词
+                setTimeout(finish, 2000);
             } else {
                 state.stale = true;
             }
@@ -2428,6 +2847,7 @@
                 if (t.closest('button[data-op="del"]')) { delCastRole(role); return; }
                 state.castSel = role;
                 state.castAct = null;
+                syncBlinkRole();
                 renderDrawer();
                 return;
             }
@@ -2465,13 +2885,17 @@
         $('st-cast-fields').addEventListener('change', onCastFieldChange);
         $('st-cast-fields').addEventListener('input', onCastFieldInput);
         $('st-cast-fields').addEventListener('click', onCastFieldClick);
+
+        // 角色表顶部的全局眨眼条
+        var gbox = document.querySelector('.st-blink-global');
+        if (gbox) gbox.addEventListener('change', onBlinkGlobalChange);
     }
 
     /* 新增角色：只填内部 id，显示名与模型在右边属性区接着填 */
     function createCastRole() {
         var input = $('st-cast-role-new-name');
         var name = (input.value || '').trim();
-        if (!name || name === 'doc') { msg('角色名无效'); return; }
+        if (!name || name === 'doc' || name.charAt(0) === '_') { msg('角色名无效'); return; }
         if (state.cast[name]) { msg('角色「' + name + '」已存在'); return; }
         state.cast[name] = { actions: {} };   // 先建角色，模型随后在右边挑
         state.castSel = name;
@@ -2531,6 +2955,36 @@
             markStale();
             // 左列宏名旁边挂着主时间线，改了要跟着变；属性区不重绘，下拉保持展开
             renderCastActList();
+            return;
+        }
+        if (key === 'blink-mode') {
+            var bAct = selCastAct();
+            if (!bAct) return;
+            var mode = el.value;
+            if (mode === 'off') bAct.blink = false;
+            else if (mode === 'on') {
+                if (!bAct.blink || typeof bAct.blink !== 'object') bAct.blink = {};
+            } else delete bAct.blink;
+            markStale();
+            renderDrawer();          // 重绘一次，摘要与参数跟着变
+            return;
+        }
+        if (key.indexOf('blink-') === 0) {
+            var bTarget = selCastAct();
+            if (!bTarget) return;
+            if (!bTarget.blink || typeof bTarget.blink !== 'object') bTarget.blink = {};
+            var blink = bTarget.blink;
+            var field = key.slice(6);
+            if (field === 'vars') {
+                var s = el.value.trim();
+                if (s) blink.vars = s; else delete blink.vars;
+            } else if (el.value === '') {
+                delete blink[field];   // 留空＝跟随默认值
+            } else {
+                var n = Number(el.value);
+                if (Number.isFinite(n)) blink[field] = Math.max(0, n);
+            }
+            markStale();
             return;
         }
     }
@@ -2722,7 +3176,7 @@
     /* 改角色 id：cast 的键 + 剧本所有引用一起迁移 */
     function renameCastRole(oldName, newName) {
         newName = (newName || '').trim();
-        if (!newName || newName === oldName || newName === 'doc') { renderCastFields(); return; }
+        if (!newName || newName === oldName || newName === 'doc' || newName.charAt(0) === '_') { renderCastFields(); return; }
         if (state.cast[newName]) { msg('角色「' + newName + '」已存在'); renderCastFields(); return; }
         if (!window.confirm('把角色「' + oldName + '」改名为「' + newName + '」？剧本引用会同步更新。')) {
             renderCastFields(); return;
@@ -2850,6 +3304,7 @@
             window.ST_CORE = state.ctx;
             window.ST_STORY = state;    // 调试/验收：查看 stage、actors 与当前行
             window.ST_AUDIO = audioPool;   // 每个角色一台播放器：看谁在播、口型跟谁
+            window.ST_BLINK = blinkPool;   // 眨眼表：看 track / vars / trBase / last（已写出的 diff）
 
             for (var i = 1; i < state.stage.length; i++) {
                 var s = state.stage[i];
@@ -2866,12 +3321,26 @@
 
             applyScene(state.scene, state.cast);   // 内部会 resetStage + syncLayout
             state.speaker = (state.stage[0] && state.stage[0].role) || firstRole(state.cast);
-            // 窗口先擦入，台词在它铺开的同时开始打（和游戏里开场一个节奏）
-            playDialogIntro();
-            renderLine(0);                         // 应用第一行的 enter/exit
+
+            // 先把首句的舞台铺到位：背景、登场角色、站位、动作。
+            // 模型已在上面 await 加载完，遮罩一退就能看到完整画面；对话框动画播完才出词。
+            primeStageForIntro();
             $('st-status').textContent = '';
             root.classList.remove('st-loading-actors');  // 布局与显隐就绪后再露出画布
             root.classList.add('st-ready');
+
+            state.introPending = true;
+            var introDone = false;
+            var finishIntro = function () {
+                if (introDone) return;
+                introDone = true;
+                state.introPending = false;
+                renderLine(0);   // 名牌 + 文字 + 语音：等对话框擦入动画结束才出
+                if (state.autoOn) armAuto(state.autoReady ? state.lineVoice : null);
+            };
+            playDialogIntro(finishIntro);
+            setTimeout(finishIntro, 2000);   // rAF 在后台标签页会被冻结，兜底别让首句永远不出现
+
             initLive();
             initAuto();
             loadBackgrounds();

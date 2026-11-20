@@ -5,40 +5,45 @@
   "lines": [
     {
       "role": "红莉栖",
-      "text": "……比预计早了三分钟。",
+      "text": "SERN是个研究机构，并不是拥有权力的统制机构。我在网上对约翰·提托这么说过很多次",
       "action": "平常",
-      "voice": "",
+      "voice": "resg06_16_krs0005.xwma.opus",
       "enter": [
         "红莉栖"
       ]
     },
     {
       "role": "红莉栖",
-      "text": "Lab 的门锁换过了，你应该没发现吧。",
+      "text": "提托里面的人已经自报家门了，我不报出身份的话不是很不公平吗",
       "action": "微笑",
-      "voice": "resg00_01_krs0007.xwma.opus"
-    },
-    {
-      "role": "红莉栖",
-      "text": "——等等，外面还有脚步声。",
-      "action": "吃惊",
-      "voice": ""
+      "voice": "resg06_16_krs0006.xwma.opus"
     },
     {
       "role": "铃羽",
-      "text": "牧濑红莉栖...",
-      "action": {
-        "timeline": "表情_怒る01",
-        "diffSlot1": "疑問",
-        "diffSlot2": "差分_目線右"
+      "text": "SERN在2036年也还是研究机构哦",
+      "cues": {
+        "红莉栖": {
+          "action": "吃惊"
+        }
       },
+      "voice": "resg06_16_suz0012.xwma.opus",
       "enter": [
         "铃羽"
       ],
-      "voice": "",
       "exit": [
         "红莉栖"
       ],
+      "move": {
+        "铃羽": {
+          "x": 0
+        }
+      }
+    },
+    {
+      "role": "铃羽",
+      "text": "然后，牧濑红莉栖...",
+      "action": "生气",
+      "voice": "resg06_16_suz0016.xwma.opus",
       "cues": {
         "红莉栖": {
           "action": "困扰"
@@ -54,10 +59,15 @@
       }
     },
     {
+      "role": "铃羽",
+      "text": "2036年的你，作为时间机器之母而受到‘膜拜’",
+      "voice": "resg06_16_suz0017.xwma.opus"
+    },
+    {
       "role": "红莉栖",
-      "text": "是我，怎么了？",
+      "text": "mobai?",
       "action": "惊讶",
-      "voice": "",
+      "voice": "resg06_16_krs0008.xwma.opus",
       "wait": 1200,
       "enter": [
         "红莉栖"
@@ -86,13 +96,15 @@
           "x": 0.38,
           "scale": 1.5
         }
+      },
+      "cues": {
+        "红莉栖": {
+          "action": {
+            "timeline": "表情_驚き01",
+            "diffSlot1": "腕差分A"
+          }
+        }
       }
-    },
-    {
-      "role": "红莉栖",
-      "text": "我们见过面吗？",
-      "action": "困扰",
-      "voice": ""
     }
   ],
   "stage": [
