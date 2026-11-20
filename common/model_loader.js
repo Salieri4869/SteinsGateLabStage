@@ -988,7 +988,27 @@ var SelectorAPI = (function () {
                     var curGpu = st[s.label];
                     var external = has(bridge.gpu, s.label) && curGpu !== bridge.gpu[s.label];
                     bridge.gpu[s.label] = curGpu;
-                    if (!has(bridge.last, s.label)) { bridge.last[s.label] = v; continue; }
+                    if (!has(bridge.last, s.label)) {
+                        /* 首帧对齐：GPU 补丁的默认姿势和 wasm 里的变量经常不是同一个值
+                           （紅莉栖默认姿势 arm_type_b，而原生 arm_type 是 0 = A）。
+                           桥只在「值变了」时才同步，基线若记成原生值，差分时间线写回
+                           同一个值（腕差分A 写 0）就永远检测不到变化 —— 听起来就是
+                           「腕差分A/B 不生效」。这里把变量改成 GPU 现状，两边同源，
+                           之后 A→0 / B→1 都是真变化。选项名对不上（默认姿势不在
+                           选择器里）时保持原样，不硬写。 */
+                        if (player.initialized === false) continue;   // 模型还没就绪，下一帧再对齐
+                        var gi = s.options.indexOf(curGpu);
+                        if (gi >= 0 && gi !== v) {
+                            try {
+                                nativeSet.call(player, s.label, gi, 0, 0);
+                                // 读回来确认：写入被丢弃（隐藏 / 未就绪）时按原值记基线，
+                                // 否则下一帧会被当成「时间线写了 0」而把 GPU 拨到 A。
+                                if (Math.round(Number(nativeGet.call(player, s.label))) === gi) v = gi;
+                            } catch (e) { }
+                        }
+                        bridge.last[s.label] = v;
+                        continue;
+                    }
                     if (external) {                  // 外部改了 GPU 状态：只重对齐基线
                         bridge.last[s.label] = v;
                         bridge.suppress = Math.max(bridge.suppress, 2);
