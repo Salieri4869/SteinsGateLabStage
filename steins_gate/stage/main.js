@@ -836,10 +836,10 @@ function installDevPanel(player, config) {
 .ed-btn:hover{background:rgba(255,255,255,.16)}
 .ed-btn.active{background:#d9603b;border-color:#d9603b;color:#fff}
 .ed-slider{flex:1;min-width:80px;accent-color:#d9603b}
-.ed-val{width:30px;text-align:right;font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
+.ed-val{width:42px;text-align:right;font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
 .ed-select{max-width:150px;padding:3px 6px;border:1px solid rgba(255,255,255,.18);
  border-radius:6px;background:rgba(0,0,0,.3);color:#eceff4;font:11px system-ui,sans-serif}
-/* ④ 时间线：每行「标签 + 一个下拉」，三个下拉左 / 右边缘严格对齐，
+/* ⑤ 时间线：每行「标签 + 一个下拉」，三个下拉左 / 右边缘严格对齐，
    不允许换行（换行会把第二个差分槽甩到下一行左侧、且没有标签）。
    flex-basis:0 让不同选项长度的 select 也得到完全相同的宽度。 */
 .ed-row.ed-row-tl{flex-wrap:nowrap}
@@ -856,6 +856,17 @@ details.ed-fold>summary{cursor:pointer;list-style:none}
 details.ed-fold>summary::-webkit-details-marker{display:none}
 details.ed-fold>summary::before{content:'\\25B8 ';opacity:.7}
 details.ed-fold[open]>summary::before{content:'\\25BE '}
+/* ④ 变量帧别名：一行一个变量（变量名 + 区间/当前值/命中帧名），展开是帧按钮网格 */
+.ed-frames-list{max-height:320px;overflow:auto;margin-top:2px}
+.ed-var{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-size:11px}
+.ed-var b{font-weight:600}
+.ed-var span{opacity:.66;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ed-frames{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 9px}
+.ed-frame{padding:3px 7px;border:1px solid rgba(255,255,255,.16);border-radius:5px;
+ background:rgba(255,255,255,.055);color:#dfe3ea;cursor:pointer;
+ font:11px/1.35 system-ui,sans-serif;font-variant-numeric:tabular-nums}
+.ed-frame:hover{background:rgba(217,96,59,.3);border-color:rgba(217,96,59,.65)}
+.ed-frame.active{background:#d9603b;border-color:#d9603b;color:#fff}
 `;
         document.head.appendChild(st);
     }
@@ -952,39 +963,52 @@ details.ed-fold[open]>summary::before{content:'\\25BE '}
     vars.forEach((v) => {
         const row = el('div', 'ed-row');
         row.appendChild(el('span', 'ed-label', shortName(v.label)));
+        // 区间取官方 variableList 的 minValue/maxValue。写死 0~100 会调不到负值帧
+        // （face_eye_open_l 的 驚き = -10），也让 10（閉じ，全闭）看起来像刚起步。
+        const lo = Number.isFinite(v.minValue) ? v.minValue : 0;
+        const hi = Number.isFinite(v.maxValue) ? v.maxValue : 100;
+        const span = hi - lo;
         const range = el('input', 'ed-slider');
         range.type = 'range';
-        range.min = '0';
-        range.max = '100';
-        range.step = '1';
+        range.min = String(lo);
+        range.max = String(hi);
+        range.step = String(span > 40 ? 1 : (span > 8 ? 0.5 : 0.1));
         let cur = Number(player.getVariable(v.label));
-        if (!isFinite(cur)) cur = 0;
-        range.value = String(Math.max(0, Math.min(100, Math.round(cur))));
-        const val = el('span', 'ed-val', range.value);
-        range.title = v.label;
+        if (!isFinite(cur)) cur = lo;
+        range.value = String(Math.max(lo, Math.min(hi, cur)));
+        const val = el('span', 'ed-val', String(+cur.toFixed(1)));
+        range.title = v.label + '（' + lo + ' ~ ' + hi + '）';
         range.addEventListener('input', () => {
-            val.textContent = range.value;
-            player.setVariable(v.label, Number(range.value), 0);
+            const x = Number(range.value);
+            val.textContent = String(+x.toFixed(1));
+            player.setVariable(v.label, x, 0);
+            syncFrames();
         });
         row.appendChild(range);
         row.appendChild(val);
         secVars.body.appendChild(row);
-        sliders.push({ v, range, val });
+        sliders.push({ v, range, val, lo, hi });
     });
     const refresh = btn('读取当前值');
-    refresh.addEventListener('click', () => sliders.forEach((s) => {
-        const x = Number(player.getVariable(s.v.label));
-        if (isFinite(x)) {
-            s.range.value = String(Math.max(0, Math.min(100, Math.round(x))));
-            s.val.textContent = s.range.value;
-        }
-    }));
+    refresh.addEventListener('click', () => {
+        sliders.forEach((s) => {
+            const x = Number(player.getVariable(s.v.label));
+            if (!isFinite(x)) return;
+            s.range.value = String(Math.max(s.lo, Math.min(s.hi, x)));
+            s.val.textContent = String(+x.toFixed(1));
+        });
+        syncFrames();
+    });
     const zero = btn('全部归零');
-    zero.addEventListener('click', () => sliders.forEach((s) => {
-        s.range.value = '0';
-        s.val.textContent = '0';
-        player.setVariable(s.v.label, 0, 0);
-    }));
+    zero.addEventListener('click', () => {
+        sliders.forEach((s) => {
+            const z = Math.max(s.lo, Math.min(s.hi, 0));
+            s.range.value = String(z);
+            s.val.textContent = String(+z.toFixed(1));
+            player.setVariable(s.v.label, z, 0);
+        });
+        syncFrames();
+    });
     // 复制当前变量值为 variables 数组 JSON，可直接粘进 cast.json 动作的 variables 字段。
     // 变量名用完整 label（不是短名）；duration 写 DEFAULT_FADE_TIME（300ms），
     // 这样粘进 cast.json 后变量是平滑淡入，而不是瞬间跳变。
@@ -1038,10 +1062,106 @@ details.ed-fold[open]>summary::before{content:'\\25BE '}
     secVars.wrap.id = 'ed-sec-vars';
     body.appendChild(secVars.wrap);
 
-    // ---- ④ 时间线 ----
+    // ---- ④ 变量帧别名frameList----
+    // 数据来源是 SDK 官方接口 player.variableList[].frameList（手册 360-361 行
+    // "get variable and its' frame alias list"）。模型作者用它给变量数值打语义标签，
+    // 例如 face_eye_open_l 的 驚き=-10 / 通常=0 / 半閉じ=5 / 閉じ=10 / 特殊1~6=50~55。
+    // 它属于「变量」而不是「时间线」，所以 ⑤ 时间线里永远看不到；此处按变量分组列出，
+    // 点帧名即可把变量直接取到该值（比拖滑条精确，也便于抄进 cast.json 的 variables）。
+    const frameVars = (player.variableList || []).filter((v) => (v.frameList || []).length > 0);
+    const secFrames = section('④ 变量帧别名 · frameList',
+        frameVars.length + ' 个变量带帧别名；点帧名直接把变量取到该值', true);
+    const fSearch = el('input', 'ed-search');
+    fSearch.type = 'search';
+    fSearch.placeholder = '过滤变量名 / 帧名…';
+    secFrames.body.appendChild(fSearch);
+    const fList = el('div', 'ed-frames-list');
+    secFrames.body.appendChild(fList);
+
+    const frameRows = [];
+    const nearestFrame = (v, cur) => {
+        let best = null;
+        (v.frameList || []).forEach((f) => {
+            if (!best || Math.abs(f.value - cur) < Math.abs(best.value - cur)) best = f;
+        });
+        return best;
+    };
+
+    frameVars.forEach((v) => {
+        const det = el('details', 'ed-fold');
+        const sum = el('summary');
+        sum.title = v.label;
+        const line = el('div', 'ed-var');
+        line.appendChild(el('b', '', shortName(v.label)));
+        const info = el('span', '', '');
+        line.appendChild(info);
+        sum.appendChild(line);
+        det.appendChild(sum);
+
+        const grid = el('div', 'ed-frames');
+        const items = [];
+        (v.frameList || []).forEach((f) => {
+            const b = el('button', 'ed-frame', f.label + ' ' + f.value);
+            b.type = 'button';
+            b.title = v.label + ' = ' + f.value;
+            b.addEventListener('click', () => {
+                player.setVariable(v.label, f.value, 0);
+                syncFrames();
+            });
+            grid.appendChild(b);
+            items.push({ b, value: f.value });
+        });
+        det.appendChild(grid);
+        fList.appendChild(det);
+        frameRows.push({ v, det, info, items });
+    });
+
+    // 刷新各变量的「当前值 / 命中帧」并把 ③ 的滑条同步到同一份真值
+    function syncFrames() {
+        frameRows.forEach((row) => {
+            const x = Number(player.getVariable(row.v.label));
+            const cur = isFinite(x) ? x : 0;
+            const nf = nearestFrame(row.v, cur);
+            const hit = !!nf && Math.abs(nf.value - cur) < 0.51;
+            row.info.textContent = '[' + row.v.minValue + ' ~ ' + row.v.maxValue + ']  '
+                + (+cur.toFixed(2)) + (hit ? '  ' + nf.label : '');
+            row.items.forEach((it) => it.b.classList.toggle('active',
+                hit && Math.abs(it.value - cur) < 0.51));
+        });
+        sliders.forEach((s) => {
+            const x = Number(player.getVariable(s.v.label));
+            if (!isFinite(x)) return;
+            s.range.value = String(x);
+            s.val.textContent = String(+x.toFixed(1));
+        });
+    }
+
+    fSearch.addEventListener('input', () => {
+        const q = fSearch.value.trim().toLowerCase();
+        frameRows.forEach((row) => {
+            const hitVar = row.v.label.toLowerCase().indexOf(q) >= 0;
+            const hitFrame = (row.v.frameList || [])
+                .some((f) => String(f.label).toLowerCase().indexOf(q) >= 0);
+            const show = !q || hitVar || hitFrame;
+            row.det.style.display = show ? '' : 'none';
+            // 只命中帧名时自动展开，免得用户以为没搜到
+            if (q && hitFrame) row.det.open = true;
+        });
+    });
+
+    const fFoot = el('div', 'ed-foot');
+    const fRefresh = btn('读取当前值');
+    fRefresh.addEventListener('click', syncFrames);
+    fFoot.appendChild(fRefresh);
+    secFrames.body.appendChild(fFoot);
+    secFrames.wrap.id = 'ed-sec-frames';
+    body.appendChild(secFrames.wrap);
+    syncFrames();
+
+    // ---- ⑤ 时间线 ----
     const mains = (player.mainTimelineLabels || []).slice();
     const diffs = (player.diffTimelineLabels || []).slice();
-    const secTl = section('④ 时间线',
+    const secTl = section('⑤ 时间线',
         mains.length + ' 条主时间线 / ' + diffs.length + ' 条差分', true);
     const mkSelect = (labels, current, onPick) => {
         const sel = el('select', 'ed-select');
@@ -1078,7 +1198,7 @@ details.ed-fold[open]>summary::before{content:'\\25BE '}
 
     // ---- ⑤ 全部部件清单（只读 + 过滤）----
     const parts = inv ? inv.parts : [];
-    const secParts = section('⑤ 部件清单 · 全部',
+    const secParts = section('⑥ 部件清单 · 全部',
         parts.length + ' 个 customPartsList 部件（只读，显示变量锚点）', true);
     const search = el('input', 'ed-search');
     search.type = 'search';
@@ -1143,6 +1263,7 @@ details.ed-fold[open]>summary::before{content:'\\25BE '}
         gpuSelectors: gpuSels.map((s) => s.label),
         nativeSelectors: nativeSels.map((s) => s.label),
         variableCount: vars.length,
+        frameVarCount: frameVars.length,
         partCount: parts.length,
         timelineCount: mains.length + diffs.length,
     });
