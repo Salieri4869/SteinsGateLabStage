@@ -3067,7 +3067,6 @@
         try {
             var scene = await getJson(file);
             var stage = stageOf(scene, state.cast);
-            var key = castingKey(stage, state.cast);
             /* 本场若用到尚未加载的模型，wasm 一页只能起一次，整页重载 */
             var needReload = stage.some(function (s) {
                 return !state.actors[s.role] || state.actors[s.role].model !== state.cast[s.role].model;

@@ -48,7 +48,8 @@ function validateActionsConfig(config) {
 
     const defaultVars = (config.defaultState && config.defaultState.variables) || [];
     const defaultNames = new Set(defaultVars.map((v) => v && v.name));
-    const reactions = config.reactions;
+    // 省略 reactions 等价于空表；保留其余类型交给下面的校验拦截
+    const reactions = config.reactions == null ? {} : config.reactions;
 
     // reactions 必须是对象（按部位分组），不再兼容旧数组格式
     if (reactions != null && typeof reactions !== 'object') {

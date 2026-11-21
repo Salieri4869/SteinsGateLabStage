@@ -283,7 +283,7 @@
                 return !e.stale && members.some(function (m) { return m.player === e.player; });
             });
         }
-        function baseFor(player, fallbackIndex) {
+        function baseFor(player) {
             for (var i = 0; i < baseOf.length; i++) {
                 if (baseOf[i].player === player) return baseOf[i].coord;
             }
@@ -315,7 +315,7 @@
             if (!baseOf.length) rememberBase();
             var base = heightRatio(h);
             members.forEach(function (m, i) {
-                var baseC = baseFor(m.player, i);
+                var baseC = baseFor(m.player);
                 var x = Number(m.x) || 0;                 // 画布宽度比例
                 var mul = Number.isFinite(m.scale) ? m.scale : 1;
                 m.player.scale = base * mul;

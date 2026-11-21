@@ -769,7 +769,8 @@ async function handleStatic(req, res, pathname) {
 
     if (info.isDirectory()) {
         if (!pathname.endsWith('/')) {         // 补尾斜杠，否则相对路径会算错一层
-            res.writeHead(301, { Location: pathname + '/' + (urlSearchOf(req)), 'X-Emote-Server': 'node' });
+            const qs = urlSearchOf(req);       // 返回不带 ? 的查询串，拼回去时要补上
+            res.writeHead(301, { Location: pathname + '/' + (qs ? '?' + qs : ''), 'X-Emote-Server': 'node' });
             return res.end();
         }
         /* 目录里有 index.html 就当首页（项目根 = 角色档案主页，steins_gate/stage/ = 场景页）；

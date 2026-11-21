@@ -277,7 +277,7 @@ class LipSyncPlayer {
     }
 
     _tick() {
-        if (!this.active || !this.timeline) return;
+        if (!this.active || !this.timeline || this.timeline.length === 0) return;
         const player = this.getPlayer();
         if (!player) return;
 
