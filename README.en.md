@@ -7,6 +7,8 @@ Run *STEINS;GATE* character E-mote models in the browser, with arm-pose switchin
 
 [中文](README.md)
 
+> **Maintenance note:** `README.md` (Chinese) is the single source of truth for the scene/line data-format reference. When you change a field there, mirror the change into this file's "Multi-character casting (story mode)" section — do not maintain two divergent definitions.
+
 ---
 
 ## Contents
