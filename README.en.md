@@ -1,37 +1,115 @@
 # SteinsGateLabStage
 
-Run *STEINS;GATE* character E-mote models in the browser, with arm-pose switching, touch reactions, voice playback and lip sync.
+Run *STEINS;GATE* character E-mote models in the browser — arm-pose switching, touch reactions, voice playback and lip sync — plus a visual script editor.
 
 > **Unofficial, non-commercial fan project. Not affiliated with MAGES., Nitroplus, or M2 Co., Ltd.**
 > This repository contains **no** original game assets (models, artwork, backgrounds, voice) and **no** E-mote runtime (proprietary SDK).
 
 [中文](README.md)
 
-> **Maintenance note:** `README.md` (Chinese) is the single source of truth for the scene/line data-format reference. When you change a field there, mirror the change into this file's "Multi-character casting (story mode)" section — do not maintain two divergent definitions.
-
----
+> **Maintenance note:** `README.md` (Chinese) is the single source of truth for the scene/line data-format reference. If you change a field definition there, mirror it in this file's "Scene data format" section — do not let the two diverge.
 
 ## Contents
 
-The homepage `index.html` has three in-page tabs ("Works / Characters / Tech") plus two mode entries in the top nav: Story Mode and LAB:
+- [Overview](#overview)
+- [Quick start](#quick-start)
+- [Local server and voice](#local-server-and-voice)
+- [Features at a glance](#features-at-a-glance)
+- [Scene data format](#scene-data-format)
+- [Editor operations](#editor-operations)
+- [Directory layout](#directory-layout)
+- [Technical notes](#technical-notes)
+- [Known limitations](#known-limitations)
+- [Credits](#credits)
+- [License](#license)
+- [Disclaimer](#disclaimer)
+
+---
+
+## Overview
+
+The homepage `index.html` has three in-page anchors — **Works / Characters / Tech** — plus two entries to standalone pages:
 
 | Entry | Description |
 |---|---|
 | `index.html` | Character archive page (world intro + Labmem roster), pure static |
 | `steins_gate/story/index.html` | **Story Mode**: visually edit lines and play them back — typewriter with click / auto advance |
-| `steins_gate/stage/index.html` | **LAB player**: interactive E-mote models (touch reactions, arm poses, lip sync). Both modes need the files under "Quick start" below |
+| `steins_gate/stage/index.html` | **LAB player**: interactive E-mote models (touch reactions, arm poses, lip sync) |
 
-## Features
+Both modes need the runtime and assets prepared in [Quick start](#quick-start).
 
-- **Direct PSB reading** — parses `.pure.psb` (PSB v4) binaries directly. No decompilation, no pre-generated config, no build step. Models dropped into `character/data/<character>/` appear in the character tab automatically; touch reactions are configured per model in the [action config guide](docs/动作配置指南.md).
-- **Arm-pose switching** — handles PSB 4.0 mutually exclusive append-parts (`insert` / `delete`) by patching the GPU texture upload, erasing the unused arm set. Works with an SDK runtime that only supports 3.9.8.
-- **Touch reactions** — hit areas derived from `charaProfile` labels (eye / mouth / bust / top …), each resolving to a random action from a pool, optionally with audio and variable interpolation.
-- **Lip sync** — offline WebAudio envelope analysis driving `face_talk` via rAF lookup. No fallback playback path; audio failures are reported and skipped.
-- **Scene UI** — character tabs with a model panel, a background preview panel, and tab reordering. Order is written back to `character/actions_config/order.json`; backgrounds and cards read the 720p thumbnails in `static/background/.thumbs/`.
-- **Story Mode** — `/steins_gate/story/` is a single page with two modes: a visual scene editor (drag / ▲▼ / add-remove lines) and a typewriter player (click / auto advance / voice / action macros). Character bindings live in `steins_gate/story/cast.json`, scenes in `steins_gate/story/scenes/*.json`. It supports **multiple characters on stage**: a scene's `stage` array lists who appears and where (`x` -1..1, `scale`, `z`), each line's `role` picks the speaker (whose action / voice / lip-sync follow him), and other on-stage roles get their own `cues` entries on that line (separate players, no cut-offs). A line's `enter` / `exit` brings characters on or off mid-scene, and `move` changes blocking within the same scene (omit it to inherit the previous line). Omitting `stage` auto-spreads the roles seen in the lines, so older scripts keep working. The player's "Live line" panel lets you type text + pick audio (a local file or one from the `character/sounds/` audio list) or synthesize it, and make the selected on-stage character speak without a script.
-- **Dev panel** — built-in inspector for selectors, poses and variables (`installDevPanel`). The "③ Variable tuning" section has a "Copy params" button that exports the current slider values as a `variables` array JSON (`[{name,value,duration}, ...]`), **skipping any item with `value=0`** (0 is the reset state and meaningless in an action); it says "no nonzero values" when everything is 0. Sliders now span each variable's real `minValue / maxValue` (`face_eye_open_l` is `-10 ~ 55`, not a hardcoded 0~100). The "④ Variable frame aliases" section lays out the official `variableList[].frameList`: variables are grouped by range and every frame name becomes a button (e.g. `閉じ 10`) that sets the value directly, with the current frame highlighted; the search box filters by frame name (typing `閉じ` keeps only the variables that define it and expands them). These aliases always existed inside the models — there was simply no UI for them before.
+## Quick start
 
-### Multiple characters on stage (Story Mode)
+**Three steps to run**:
+
+1. Install **Node.js 18+**;
+2. Prepare the runtime and assets from the lists below;
+3. Double-click `run.bat` (Windows) or run `./run.sh` (macOS / Linux / Git Bash), then open `http://127.0.0.1:8000/`.
+
+**This repository does not run out of the box.** Two categories of files are excluded by `.gitignore` and must be supplied by you:
+
+**① E-mote runtime → `driver/`**
+
+- Required: `emotedriver.js`, `emotedriver.wasm` (verified against the `driver_wasm_modularize` build), `emoteplayer.js`
+- Obtain from [M2 Co., Ltd.](https://emote.mtwo.co.jp/) via an SDK application
+- ⚠️ Proprietary software whose terms prohibit redistribution. **Never commit `driver/` to a public repository**; this project will not provide it.
+
+**② Models and assets**
+
+| Directory | Content |
+|---|---|
+| `character/data/<character>/<name>.pure.psb.zip` | Character models, each zip containing one `pure.psb` |
+| `character/sounds/` | Story voice clips (optional; missing files are silently skipped) |
+| `static/background/` | Background images, just drop the files in; `.thumbs/` is generated by the page |
+| `static/bgm/` | Background music audio, just drop the files in; see [Background music `bgm`](#background-music-bgm) |
+
+Assets must be extracted from a copy of the game you legally own. None are provided here.
+
+Then serve over HTTP (`fetch` requires it; `file://` will not work):
+
+```bash
+node main.mjs --port 8000     # or ./run.sh 8000 (macOS / Linux / Git Bash)
+                              # on Windows, double-click run.bat instead
+# open http://127.0.0.1:8000/
+```
+
+## Local server and voice
+
+`main.mjs` is a dependency-free static server (Node 18+, default port 8899; `run.bat` / `run.sh` default to 8000, bound to 127.0.0.1 only). Beyond `python -m http.server` it adds these write endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET/PUT /api/order` | Read/write character order in `character/actions_config/order.json` |
+| `GET /api/thumbs`, `PUT /api/thumb` | Background thumbnails in `static/background/.thumbs/` |
+| `GET/PUT /api/story` | Read/write `steins_gate/story/cast.json` and `steins_gate/story/scenes/*.json` |
+| `GET /api/voice` | List live-line audio (`steins_gate/story/voices/`) |
+| `GET /api/voice?name=…` | Stream audio with Range support (seekable) |
+| `POST /api/voice` (octet-stream) | Import audio to disk, 12MB max (the page's "Pick audio" / "Audio list" never use this — no disk writes) |
+| `POST /api/voice` (json) | Text → speech synthesis (TTS hook, `{"text":"…"}`) |
+
+**Live-line audio has three sources**:
+
+- **Pick audio** — plays a local file in-browser via a temporary blob URL; never uploaded or written to disk.
+- **Audio list** — lists folders and audio files under `character/sounds/` and plays the chosen one from a static path; also never written to disk.
+- **Text synthesis** — a TTS hook. Set env vars `EMOTE_TTS_BIN` (e.g. `edge-tts`) and optionally `EMOTE_TTS_VOICE` (default `zh-CN-XiaoxiaoNeural`) to enable it; without config the endpoint returns 501 and the UI tells you to pick audio instead. The external command must accept `--voice <name> --text <text> --write-media <file>`. **Only synthesized audio is saved** to `steins_gate/story/voices/`.
+
+Any other static server works too — write capabilities just degrade to read-only: ordering lasts for the session, thumbnails are only read from disk, scenes cannot be saved, and text synthesis is unavailable; "Pick audio" and "Audio list" need no server-side writes and still work.
+
+## Features at a glance
+
+| Feature | Description |
+|---|---|
+| **Direct PSB reading** | Parses `.pure.psb` (PSB v4) binaries directly — no decompilation, pre-generated config or build step. Models dropped into `character/data/<character>/` appear in the character tab automatically; touch reactions are configured per model in the [action config guide](docs/动作配置指南.md). |
+| **Arm-pose switching** | Handles PSB 4.0 mutually exclusive append-parts (`insert` / `delete`) by patching the GPU texture upload, erasing the unused arm set. Works with an SDK runtime that only supports 3.9.8. |
+| **Touch reactions** | Hit areas derived from `charaProfile` labels (eye / mouth / bust / top …), each resolving to a random action from a pool, optionally with audio and variable interpolation. |
+| **Lip sync** | Offline WebAudio envelope analysis driving `face_talk` via rAF lookup. No fallback playback path; audio failures are reported and skipped. |
+| **Scene UI** | Character tabs with a model panel, background preview, and tab reordering. Order is written back to `order.json`; backgrounds and cards read the 720p thumbnails in `.thumbs/`. |
+| **Story Mode** | `/steins_gate/story/` is a single page with two modes: a visual scene editor (drag / ▲▼ / add-remove lines) and a typewriter player (click / auto advance / voice / action macros). Supports multiple characters on stage, mid-scene entrances/exits and blocking — see [Scene data format](#scene-data-format). |
+| **Dev panel** | Built-in selector / pose / variable inspector (`installDevPanel`). See [Dev panel](#dev-panel). |
+
+## Scene data format
+
+> This section is the **single source of truth** for the story mode field definitions. A working example lives in `steins_gate/story/scenes/demo.json`.
 
 A scene can keep several characters on screen at once. Bind each role to a model in `cast.json`, then declare who appears and where with `stage`:
 
@@ -58,91 +136,123 @@ A scene can keep several characters on screen at once. Bind each role to a model
 }
 ```
 
-- `bgm`: **background music** (optional, multiple segments). `file` is an audio file under `static/bgm/`; `range: [from, to]` is the 1-based inclusive line range (e.g. `[1,3]` covers lines 1–3). The track loops within its range without restarting when advancing lines; it only switches/stops on entering another segment or leaving all ranges. Legacy `{ file, from, to }` entries are migrated to `range` on load. The editor lists `static/bgm/` audio in the properties panel (filter it with the search box) — drag one onto the BGM track at the right of the script lines to place a segment. Drag the whole segment to move it, or its top/bottom grips to resize; both snap to whole lines. The track is narrow, so segment names are written vertically with the range in small digits at the bottom. Click a segment to reveal the right-side panel where you set the range, delete it, or hit Play for a preview; `Backspace`/`Delete` also removes the selected segment (editing never auto-plays; playback mode still follows lines automatically). A segment may set `fadeIn`/`fadeOut` booleans (default false): `fadeIn` ramps volume up at start, `fadeOut` ramps it down on stop/segment switch, both about 1 second, toggled by the "淡入"/"淡出" buttons in the right panel; they apply to both preview and playback.
-- `stage`: `x` is a fraction of canvas width (-1 left / +1 right), `scale` a relative size, `z` the stacking order. This is the scene's **default blocking**. A role with any `enter` is treated as entering mid-scene and starts hidden; other roles start on stage. Who enters/exits at which line is decided by that line's `enter`/`exit`.
-- `move`: **this line's blocking change**. Keys are role names, values are an `x` number or `{ x, scale, z }` (only the fields you want to change). Omit it and the previous line's position stays; once set it holds until the next change — no need to repeat positions on every line.
-- `name`: **the name shown in the textbox from this line on**. Like `move`, it is sticky — it holds for that role until its next override, and omitting it inherits the previous line. Use it for unknown speakers ("???"): `role` still uses the cast key, so models, voices, blocking and actions are untouched:
+**Field reference**:
 
-  ```json
-  { "role": "Kurisu", "text": "Who are you? How do you know my name?", "name": "???" },
-  { "role": "Kurisu", "text": "Don't look at me like that." },
-  { "role": "Kurisu", "text": "...Fine. I'm Makise Kurisu.", "name": "Kurisu" }
-  ```
+| Field | Location | Meaning |
+|---|---|---|
+| `title` / `background` | scene | Title / background image |
+| `bgm` | scene | Background-music segment list, multiple allowed — see [below](#background-music-bgm) |
+| `stage` | scene | Default cast and blocking for the scene; optional — see [Casting `stage`](#casting-stage) |
+| `role` | line | This line's speaker; `action` comes from `cast[role].actions`, `voice` from `cast[role].voiceDir` |
+| `text` / `name` | line | Dialogue / name shown in the textbox — see [Blocking and display name](#blocking-and-display-name) |
+| `action` / `voice` | line | Speaker's action macro / voice file |
+| `enter` / `exit` | line | Roles entering / leaving mid-scene on this line |
+| `move` | line | This line's blocking change — see [Blocking and display name](#blocking-and-display-name) |
+| `cues` | line | Per-role performance for other on-stage characters — see [Cues](#cues) |
+| `wait` | line | Extra pause on top of the speaker's voice when auto-advancing |
 
-  The default lives in `cast.json`: `{ "Kurisu": { "model": "...", "name": "Assistant" } }`; without it the key is used. The key is the internal id (script references, voice folder, model binding all hang off it) — the display name only changes the text on screen, so nothing breaks. Two layers in the editor: the "Display name" of the selected line applies **from that line on** (empty = inherit, `⟲` fills in the role's real name for a reveal, the adjacent "set as default" turns it into the role default); the "Display name" on the cast tab is the **global default**.
-- Each line's `role` picks the speaker: `action` comes from `cast[role].actions`, `voice` from `cast[role].voiceDir`.
-- `cues`: **per-character performance for the same line** — other on-stage roles can each get their own `action` / `voice` (both optional):
+### Background music `bgm`
 
-  ```json
-  "cues": {
-    "Kurisu": { "action": "surprised", "voice": "resg00_01_krs0005.xwma.opus" },
-    "Suzuha": { "action": { "timeline": "表情_笑う", "diffSlot1": "ひく", "diffSlot2": "" } }
-  }
-  ```
+`bgm` is optional and supports multiple segments. Each segment:
 
-  An action object has exactly three fields: `timeline` (main timeline) and `diffSlot1` / `diffSlot2` (two independent diff slots). Omit a field to leave it alone; an empty string clears it explicitly (say the previous line had a `diffSlot2` and this one must drop it).
+- `file` — an audio filename under `static/bgm/`.
+- `range: [from, to]` — 1-based inclusive line range, e.g. `[1,3]` covers lines 1–3. The track loops within its range without restarting when advancing lines; it only switches/stops on entering another segment or leaving all ranges. Legacy `{ file, from, to }` entries are migrated to `range` on load.
+- `fadeIn` / `fadeOut` (optional booleans, default `false`) — `fadeIn` ramps volume up at start, `fadeOut` ramps it down on stop/segment switch, both about 1 second; they apply to both preview and playback.
 
-  Every role gets its own audio player, so lip-sync and playback stay on that character and two people can talk at once without cutting each other off.
-- Auto-advance is not a line property: the `AUTO` button on the dialogue box (native `main.psb.m` slices, placed where the game puts it — bottom-left, `left:26 / top:1022`) is a global toggle. When lit, each line waits for the speaker's voice (plus that line's `wait`) and then advances; clicking the screen still advances immediately. The toggle is remembered in localStorage. The legacy per-line `auto` field is ignored on read and stripped on save.
-- The right panel is organised one section per line: `Scene` → `Line N`. The line number appears once — speaker, display name, text, AUTO pause and this line's **cast on stage** all live in that single "Line N" block ("Cast on stage" is an inline sub-heading, no longer a section of its own). `cast.json` no longer takes a slot in the right panel.
-- "Cast on stage" shows one card per role, four rows that cover everything that role does on this line:
-  1. role dropdown (who is in the scene) + keep / enter / exit (this line's `enter`/`exit`) + remove;
-  2. position and scale — **line 1 is the scene default** (stored in `stage`), editing from line 2 onwards writes that line's `move`, otherwise it inherits (grey = inherited, orange = overridden, `↺` drops back);
-  3. this line's action and voice — the speaker writes line-level `action`/`voice`, other roles write `cues`; picking "custom…" expands **main timeline / diff slot 1 / diff slot 2** as three dropdowns, and typing a name + "save as macro" writes it into `cast[role].actions`;
-  4. **binding**, collapsed to one summary line (`Binding  Kurisu_white ▸`): open it for the model dropdown and the voice folder — "which skin, where the audio lives" belongs to the role itself.
-  All three dropdowns are filled from that role's model, so you can re-pick at any time without clearing first; empty means "leave as is" (an empty diff slot explicitly clears it).
-  There are no separate "Blocking" or "Performance" blocks any more: where a role stands, what it does and which model it wears all live in its own card.
-- Display names surface everywhere in the editor: the line list, the speaker dropdown and the role-card dropdown all show the `cast` display name (with `(internal id)` appended when it differs, so duplicates stay distinguishable), and the "Display name" field's `inherit: X` hint updates as you type.
-- Next to "Display name" there is `⟲` (fill in the role's real name, for a reveal) and "set as default": the latter writes the current value as that role's **default name** into `cast[role].name`. You never leave the line to name a character.
-- The left column has two **tabs**, `Script` / `Cast`, sharing the same area; `Esc` goes back to the script. The cast tab gives its space to the `roles / action macros / properties` three-column view (the right panel steps aside) for auditing, renaming and deleting; each macro row shows its main timeline inline, so you don't have to open them one by one. Everyday edits (model, default name, macros) still happen where they are used — on the role card, the line's "set as default", "save as macro" — so there is no need to visit this tab.
-- There is exactly **one "Save"**: scene and `cast.json` are written together (`saveCurrent` PUTs both files). The cast tab has no save button of its own.
-- **Variables from stage into script**: after tuning a set of values in the LAB page's "Variable tuning", click "Copy params" (exports nonzero `variables` JSON), then in the cast tab select an action macro → "variables" fields → "Paste import", and paste the JSON to bulk-add variable rows (or edit rows directly: the variable name is a dropdown filled from the current model's `variableList`; names from old configs or pasted imports that the model does not declare still appear as an option; pick "custom…" to type a brand-new name, then press Enter or click away to switch back to the dropdown automatically, Esc to cancel; value/duration/delay remain numeric inputs; Ctrl+Enter imports quickly). This lets an action macro carry the tuned diff/expression variables.
-- **Blinking (`blink`)**: the rhythm is not ours — it follows the wasm's built-in auto-blink, which every 1.3–3 s drives `face_eye_open` up to `10` (閉じ) along a 10-frame curve and back to its baseline. **The variable set is detected per model**: `face_eye_open_l` / `_r` are the actual eyelids (`0` open / `5` half / `10` closed / `55` special), while the SDK only drives the singular `face_eye_open` (inner eye shadow / pupil line / highlight), so the L/R eyelids have to be filled in by us; models that do not declare them only expose `face_eye_open` and we write nothing — the SDK already moves those eyelids, and writing would double the closure. Driving uses `setVariableDiff` (module `blink`): **the diff is added on top of the current base and does reach the renderer** (measured: lid `0` + diff `15` renders identically to lid `10`), so a running action fade or a manual dev-panel tweak needs no special casing, and writing the diff back to `0` simply reveals the base again. Each frame does one linear follow: `k = (track - trBase) / (10 - trBase)`, `diff = (closeValue - current lid value) * k`. Two details matter: **① relative baseline** — the resting value of `face_eye_open` is raised by expressions (鈴羽 angry = `2`, 紅莉栖 surprised = `8`), so using the absolute value as a ratio leaves the eyes permanently half-closed and gives a blink only 2 units of travel (it reads as "barely blinking"); the baseline is identified by **rate of change**: a shift slower than `0.015` units/ms counts as an expression fade (surprised: 8 units over 1 s = `0.008`) and is followed directly, while for 250 ms after any fast change (a blink is `0.02~0.12`) drift is ignored so a brief pause at the blink peak is not mistaken for a new baseline (which would read as \"open once, then close\"). This is frame-rate independent, so low frame rates do not cause misjudgement. **② close the gap to `closeValue` instead of adding `closeValue`** — the lid base is not 0 (surprised `-5`, angry `4`), and a plain `+closeValue` either under-closes or overshoots (`4+10=14` is already out of range). Separately, if `track` sits at full closure for more than 250 ms it is not a blink but an action holding the eyes down (鈴羽's 困る01 head-shake pins `face_eye_open` at `10`); the baseline is re-learnt and the diff zeroed instead of forcing the eyes shut — otherwise she stays closed for the rest of the scene, replay included. A diff has no remove API, so stopping the watcher / changing the eyelid variables / disabling blinking / switching action must all write `0` explicitly. Blinking starts for **every character** once staging settles, not when someone speaks. Configuration is per character: `blink` in `cast.json` (`on` defaults to `true`, `closeValue` to `10`; `vars` / `track` may point at other names), edited by the "<character> 默认眨眼" bar at the top of the cast tab; **actions no longer override it** — every action follows the character setting. Paging, switching scenes, the ending and entering edit mode all stop the watcher and zero the diff.
-- Switching to a scene that needs new models reloads the page once; changing a model in a role card says so explicitly ("takes effect after saving and reloading").
-- `stage` is optional: when absent, the roles seen in the lines are spread evenly, so existing scripts need no changes. See `steins_gate/story/scenes/demo.json` for a full example.
+**In the editor**: the properties panel lists `static/bgm/` audio (filter it with the search box); drag one onto the BGM track at the right of the script lines to place a segment. Drag the whole segment to move it, or its top/bottom grips to resize — both snap to whole lines. The track is narrow, so segment names are written vertically with the range in small digits at the bottom. Click a segment to set its range, preview it, toggle "淡入"/"淡出" (fade in/out), or delete it in the right-side panel; `Backspace`/`Delete` also removes the selected segment. Editing never auto-plays; playback mode still follows lines automatically.
 
-## Quick start
+### Casting `stage`
 
-**This repository does not run out of the box.** Two categories of files are required and both are excluded by `.gitignore`:
+`x` is a fraction of canvas width (-1 left / +1 right), `scale` a relative size, `z` the stacking order — this is the scene's **default blocking**. A role with any `enter` is treated as entering mid-scene and starts hidden; other roles start on stage. Who enters/exits at which line is decided by that line's `enter`/`exit`. `stage` may be omitted: the roles seen in the lines are then spread evenly, so older scripts keep working unchanged.
 
-1. **E-mote runtime** → `driver/`
-   - Required: `emotedriver.js`, `emotedriver.wasm` (verified against the `driver_wasm_modularize` build), `emoteplayer.js`
-   - Obtain from [M2 Co., Ltd.](https://emote.mtwo.co.jp/) via an SDK application
-   - ⚠️ Proprietary software whose terms prohibit redistribution. **Never commit `driver/` to a public repository**; this project will not provide it.
+### Blocking and display name
 
-2. **Models and assets** → `character/data/` and `static/background/`
-   - `character/data/<character>/<name>.pure.psb.zip`, each containing one `pure.psb`
-   - `static/background/` — background images, just drop the files in; `static/background/.thumbs/` is generated by the page
-   - `static/bgm/` — background music audio, just drop the files in; drag one from the "Background Music" list in the story editor onto the BGM track at the right of the script lines, then click the segment to preview/configure it in the right-side panel
-   - Must be extracted from a copy of the game you legally own. Not provided here.
+`move` is **this line's blocking change**: keys are role names, values are an `x` number or `{ x, scale, z }` (only the fields you want to change). Omit it and the previous line's position stays; once set it holds until the next change — no need to repeat positions on every line.
 
-Then serve over HTTP (`fetch` requires it; `file://` will not work):
+`name` is **the name shown in the textbox from this line on**. Like `move`, it is sticky — it holds for that role until its next override, and omitting it inherits the previous line. Use it for unknown speakers ("???"): `role` still uses the cast key, so models, voices, blocking and actions are untouched:
 
-```bash
-node main.mjs --port 8000     # or ./run.sh 8000 (macOS / Linux / Git Bash)
-                              # on Windows, double-click run.bat instead
-# open http://127.0.0.1:8000/
+```json
+{ "role": "Kurisu", "text": "Who are you? How do you know my name?", "name": "???" },
+{ "role": "Kurisu", "text": "Don't look at me like that." },
+{ "role": "Kurisu", "text": "...Fine. I'm Makise Kurisu.", "name": "Kurisu" }
 ```
 
-Once running, the homepage offers three in-page anchors (Works / Characters / Tech) and two mode entries: the LAB interactive player and Story Mode. For story voice, drop audio into `character/sounds/` (missing files are silently skipped).
+The default lives in `cast.json`: `{ "Kurisu": { "model": "...", "name": "Assistant" } }`; without it the key is used. The key is the internal id (script references, voice folders and model bindings all hang off it) — the display name only changes text on screen, so nothing breaks. In the editor there are two layers: the selected line's "Display name" applies **from that line on** (empty = inherit; `⟲` fills in the role's real name for a reveal; the adjacent "set as default" writes it as the role default), while the "Display name" on the cast tab is the **global default**.
 
-`main.mjs` is a dependency-free static server (Node 18+, default port 8899; `run.bat` / `run.sh` default to 8000, bound to 127.0.0.1 only). Beyond `python -m http.server` it adds these endpoints:
+### Cues
 
-| Endpoint | Purpose |
-|---|---|
-| `GET/PUT /api/order` | Read/write character order in `character/actions_config/order.json` |
-| `GET /api/thumbs`, `PUT /api/thumb` | Background thumbnails in `static/background/.thumbs/` |
-| `GET/PUT /api/story` | Read/write `steins_gate/story/cast.json` and `steins_gate/story/scenes/*.json` |
-| `GET /api/voice` | List live-line audio (`steins_gate/story/voices/`) |
-| `GET /api/voice?name=…` | Stream audio with Range support (seekable) |
-| `POST /api/voice` (octet-stream) | Import audio to disk, 12MB max (the page's "Pick audio" / "Audio list" never use this — no disk writes) |
-| `POST /api/voice` (json) | Text → speech synthesis (TTS hook, `{"text":"…"}`) |
+`cues` holds **per-role performance for other on-stage roles on this line**, written the same way as line-level fields (`action` / `voice` both optional):
 
-**Live-line audio source**: three tabs. "Pick audio" plays a local file in-browser via a temporary blob URL — never uploaded or written to disk. "Audio list" lists folders and audio files under `character/sounds/` and plays the chosen one from a static path — also never written to disk. "Text synthesis" is a TTS hook: set env vars `EMOTE_TTS_BIN` (e.g. `edge-tts`) and optionally `EMOTE_TTS_VOICE` (default `zh-CN-XiaoxiaoNeural`) to enable it; without config the endpoint returns 501 and the UI tells you to pick audio instead. Only synthesized audio is saved to `steins_gate/story/voices/`. The external command must accept `--voice <name> --text <text> --write-media <file>`.
+```json
+"cues": {
+  "Kurisu": { "action": "surprised", "voice": "resg00_01_krs0005.xwma.opus" },
+  "Suzuha": { "action": { "timeline": "表情_笑う", "diffSlot1": "ひく", "diffSlot2": "" } }
+}
+```
 
-Any other static server works too — write capabilities just degrade to read-only: ordering lasts for the session, thumbnails are only read from disk, scenes cannot be saved, and text synthesis (TTS) is unavailable; "Pick audio" and "Audio list" need no server-side writes and still work.
+An action object has exactly three fields: `timeline` (main timeline) and `diffSlot1` / `diffSlot2` (two independent diff slots). Omit a field to leave it alone; an empty string clears it explicitly (say the previous line had a `diffSlot2` and this one must drop it).
 
-## Layout
+Every role gets its own audio player, so lip-sync and playback stay on that character and two people can talk at once without cutting each other off.
+
+### Auto-advance
+
+Auto-advance is not a line property: the `AUTO` button on the dialogue box (native `main.psb.m` slices, placed where the game puts it — bottom-left, `left:26 / top:1022`) is a global toggle. When lit, each line waits for the speaker's voice (plus that line's `wait`) and then advances; clicking the screen still advances immediately. The toggle is remembered in localStorage. The legacy per-line `auto` field is ignored on read and stripped on save.
+
+### Blinking `blink`
+
+The rhythm is not ours — it follows the wasm's built-in auto-blink, driving `face_eye_open` up to `10` (closed) along a 10-frame curve and back to its baseline every 1.3–3 s.
+
+Configuration is **per character**: `cast.json`'s `blink` (`on` defaults to `true`, `closeValue` to `10`; `vars` / `track` can rename variables), edited directly by the "<character> default blink" row at the top of the cast tab. **Actions no longer override it individually** — every action follows the character's single setting. Blink timers start for **all** characters once blocking settles, without waiting for anyone to speak. Page turns / scene changes / endings / entering edit mode stop the timers and zero the diff.
+
+<details>
+<summary><b>How blinking works internally (expand for details)</b></summary>
+
+**The variable set is detected per model**: `face_eye_open_l` / `_r` are the actual eyelids (`0` open / `5` half / `10` closed / `55` special), while the SDK only drives the singular `face_eye_open` (inner eye shadow / pupil line / highlight), so the L/R eyelids have to be filled in by us. Models that do not declare those two variables only expose `face_eye_open` — we write nothing, since the SDK already moves those eyelids and writing would double the closure.
+
+**Driving**: via `setVariableDiff` (module `blink`). The diff is added on top of the current base and does reach the renderer (measured: lid `0` + diff `15` renders identically to lid `10`), so a running action fade or a manual dev-panel tweak needs no special casing; writing the diff back to `0` simply reveals the base. Each frame does one linear follow:
+
+```
+k    = (track - trBase) / (10 - trBase)
+diff = (closeValue - current lid value) * k
+```
+
+Two details matter:
+
+1. **Relative baseline** — the resting value of `face_eye_open` is raised by expressions (Suzuha angry = `2`, Kurisu surprised = `8`); using the absolute value as a ratio leaves the eyes permanently half-closed and gives a blink only 2 units of travel (it reads as "barely blinking"). The baseline is identified by **rate of change**: a shift slower than `0.015` units/ms counts as an expression fade (surprised: 8 units over 1 s = `0.008`) and is followed directly, while for 250 ms after any fast change (a blink is `0.02~0.12`) drift is ignored so a brief pause at the blink peak is not mistaken for a new baseline (which would read as "open once, then close"). This is frame-rate independent, so low frame rates do not cause misjudgement.
+2. **Close the gap to `closeValue`, don't add `closeValue`** — the lid base is not 0 (surprised `-5`, angry `4`), so a plain `+closeValue` under- or over-closes (`4+10=14` is well out of range).
+
+**Fallback**: if `track` stays pinned at full closure for over 250 ms, it is no longer a blink but an action holding the eyes shut (Suzuha's "shake head" 困る01 pins `face_eye_open` at `10`). In that case the code switches to treating it as the baseline and zeroes the diff instead of forcing a close — otherwise the eyes would stay shut after that line and on replays too.
+
+The diff has no remove API; stopping the timer, swapping the lid variable, disabling blink or switching actions must all explicitly write `0`.
+
+</details>
+
+## Editor operations
+
+- **The right panel is organised one section per line**: `Scene` → `Line N`. The line number appears once — speaker, display name, text, AUTO pause and this line's **cast on stage** all live in that single "Line N" block ("Cast on stage" is an inline sub-heading, not a separate section). `cast.json` no longer takes a slot in the right panel.
+- **"Cast on stage" shows one card per role**, four rows covering everything that role does on this line:
+
+  1. Role dropdown (who is in the scene) + keep / enter / exit (this line's `enter`/`exit`) + remove;
+  2. Position and scale — **line 1 is the scene default** (stored in `stage`); editing from line 2 onwards writes that line's `move`, otherwise it inherits (grey = inherited, `↺` drop back, orange = overridden);
+  3. This line's action and voice — the speaker writes line-level `action`/`voice`, other roles write `cues`; picking "custom…" expands **main timeline / diff slot 1 / diff slot 2** as three dropdowns, and typing a name + "save as macro" writes it into `cast[role].actions`;
+  4. **Binding**, collapsed to one summary line (`Binding  Kurisu_white ▸`): open it for the model dropdown and voice folder — "which skin, where the audio lives" belongs to the role itself.
+
+  All three dropdowns are filled from that role's model, so you can re-pick at any time without clearing first; empty means "leave as is" (an empty diff slot explicitly clears it). There are no separate "Blocking" or "Performance" blocks any more — where a role stands, what it does and which model it wears all live in its own card.
+
+- **Display names surface everywhere**: the line list, speaker dropdown and role-card dropdown all show the `cast` display name (with `(internal id)` appended when it differs, so duplicates stay distinguishable), and the line's "Display name" `inherits: X` hint updates as you type. You never leave the line to name a character.
+- **Two tabs on the left**: `Script` / `Cast`, sharing the same area; `Esc` goes back to the script. The cast tab gives its space to the `roles / action macros / properties` three-column view for auditing, renaming and deleting; each macro row shows its main timeline inline. Everyday edits (model, default name, macros) still happen where they are used — on the role card, the line's "set as default" and "save as macro" — so there is no need to visit this tab.
+- **Exactly one "Save"**: scene and `cast.json` are written together (`saveCurrent` PUTs both files). The cast tab has no save button of its own.
+- **Variables from stage into script**: after tuning a set of values in the LAB page's "Variable tuning", click "Copy params" (exports nonzero `variables` JSON), then in the cast tab select an action macro → properties "variables" field → "Paste import" to bulk-add variable rows. The variable name is a dropdown filled from the current model's `variableList`; names from old configs or pasted imports that the model does not declare still appear as an option; pick "custom…" to type a brand-new name, then press Enter or click away to switch back to the dropdown automatically, `Esc` to cancel; `value` / `duration` / `delay` remain numeric inputs; `Ctrl+Enter` imports quickly. This lets an action macro carry the tuned diff/expression variables.
+- Switching to a scene that needs new models reloads the page once; changing a model in a role card says so explicitly ("takes effect after saving and reloading").
+
+### Dev panel
+
+The LAB page's built-in selector / pose / variable inspector (`installDevPanel`):
+
+- **③ Variable tuning** — the "Copy params" button exports the current slider values as a `variables` array JSON (`[{name,value,duration}, ...]`), **skipping any item with `value=0`** (0 is the reset state and meaningless in an action); it says "no nonzero values" when everything is 0. Sliders now span each variable's real `minValue / maxValue` (`face_eye_open_l` is `-10 ~ 55`, not a hardcoded 0~100).
+- **④ Variable frame aliases** — lays out the official `variableList[].frameList`: variables are grouped by range and every frame name becomes a button (e.g. `閉じ 10`) that sets the value directly, with the current frame highlighted; the search box filters by frame name (typing `閉じ` keeps only the variables defining it and expands them). These aliases always existed inside the models — there was simply no UI for them before.
+
+## Directory layout
 
 ```
 index.html                  Character archive page
@@ -164,7 +274,7 @@ common/                     Runtime shared by the player and story pages
   lipsync.js                Lip sync (offline WebAudio analysis, rAF lookup)
   emote_config.js           Base model / action config
   config_validator.js       Config shape validation (with CLI self-test)
-steins_gate/                     Page container
+steins_gate/                Page container
   stage/                    LAB player
     index.html              Player entry
     main.js                 Bootstrap, interaction, arm switcher, dev panel
@@ -174,7 +284,7 @@ steins_gate/                     Page container
     story.js                Scene I/O, typewriter player, line editor
     cast.json               Character -> model / voice dir / action macros
     scenes/                 Scene JSON files
-    voices/                 TTS-synthesized audio ("pick audio" / "audio list" never write here; only text synthesis does)
+    voices/                 TTS-synthesized audio ("pick audio" / "audio list" never write here)
 static/                     Static assets
   css/  js/                 Stylesheets and scripts
   background/               Background images (not in repo)
@@ -188,7 +298,7 @@ docs/                       Technical write-ups
 
 ### Why parse PSB ourselves
 
-Across the 83 `EmotePlayer_*` / `EmoteDevice_*` functions exported by the wasm, the 69 that `emoteplayer.js` actually calls expose only `charaProfile` labels and `charaBounds` — **not atlas rectangles, the `source` table, or `customSelectorList`**. Exclusive arm sets are therefore not enumerable at the SDK level and must be read from the raw bytes. That is the sole reason `PsbReader` exists.
+The wasm exports 84 `EmotePlayer_*` / `EmoteDevice_*` functions, of which `emoteplayer.js` calls 67. For model metadata these interfaces expose only `charaProfile` labels and `charaBounds` — **not atlas rectangles, the `source` table, or `customSelectorList`**. Exclusive arm sets are therefore not enumerable at the SDK level and must be read from the raw bytes. That is the sole reason `PsbReader` exists.
 
 The parser reads only the structure region (~1 MB) and skips the following ~200 MB of texture data, taking roughly 10 ms in-browser.
 
