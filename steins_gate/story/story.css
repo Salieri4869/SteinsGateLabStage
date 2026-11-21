@@ -7,15 +7,59 @@
             font-style: normal;
             font-display: swap;
         }
+        /* ============================================================
+           设计 token —— 编辑态统一色板 / 文字层级 / 字号 / 圆角。
+           播放态 #st-hud 是逐帧还原原作的资产，仍用硬编码像素，不引用这些变量。
+           想整体回退，只需删掉这个 :root 块与引用处即可。
+           ============================================================ */
+        :root {
+            /* 强调色：青绿=场景/角色/常规 · 琥珀=BGM · 金=即时台词/提示 */
+            --accent:       #63d6c4;
+            --accent-soft:  rgba(99, 214, 196, .14);
+            --accent-line:  rgba(99, 214, 196, .34);
+            --amber:        #e2a45f;
+            --amber-soft:   rgba(226, 164, 95, .14);
+            --amber-line:   rgba(226, 164, 95, .45);
+            --gold:         #e9b96e;
+            --gold-soft:    rgba(233, 185, 110, .14);
+            --gold-line:    rgba(233, 185, 110, .42);
+            --violet:       #bda7ec;
+            --cyan:         #8fd3e8;
+            --danger:       #d9685a;
+            /* 文字层级：比原先整体提亮一档，解决小字发虚、对比度不足 */
+            --text-1: #f0f7f5;   /* 主文本 */
+            --text-2: #d3e2de;   /* 次文本 */
+            --text-3: #aec4bf;   /* 辅助（原 rgba .5~.6） */
+            --text-4: #8aa29d;   /* 弱化（原 rgba .32~.4） */
+            /* 表面 */
+            --surface-0: #07141a;   /* 画布底 */
+            --surface-1: #0b1f26;   /* 面板 */
+            --surface-2: #061116;   /* 凹陷 / 输入 */
+            --surface-3: #122a32;   /* 抬起 / hover */
+            /* 描边 */
+            --hairline:   rgba(99, 214, 196, .22);
+            --hairline-2: rgba(99, 214, 196, .40);
+            /* 字号阶梯（编辑态基准较原先 +1px） */
+            --fs-xs: 10px;
+            --fs-sm: 11px;
+            --fs-md: 12px;
+            --fs-base: 13px;
+            --fs-lg: 15px;
+            /* 圆角 */
+            --radius-sm: 4px;
+            --radius:    6px;
+            --radius-lg: 10px;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         /* 原生控件（select 展开菜单、滚动条等）按深色渲染，和自定义深色下拉风格一致 */
         html { color-scheme: dark; }
         html, body { width: 100%; height: 100%; overflow: hidden; }
         body {
-            background: #07141a center center / cover no-repeat;
-            color: #e6f1ef;
+            background: var(--surface-0) center center / cover no-repeat;
+            color: var(--text-1);
             font-family: "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
             font-weight: 500;
+            font-size: var(--fs-base);
         }
         #canvas {
             display: block; position: fixed; inset: 0;
@@ -28,26 +72,29 @@
         html.st-loading-actors #canvas { visibility: hidden; }
 
         #st-bar {
-            position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 10;
-            display: flex; align-items: center; gap: 12px; padding: 0 16px;
-            background: rgba(4, 12, 17, .82); border-bottom: 1px solid rgba(99, 214, 196, .22);
+            position: fixed; top: 0; left: 0; right: 0; height: 48px; z-index: 10;
+            display: flex; align-items: center; gap: 12px; padding: 0 18px;
+            background: rgba(5, 15, 20, .92); backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--hairline);
         }
         .st-home {
-            color: #9fb8b4; text-decoration: none; cursor: pointer; white-space: nowrap;
-            border: 1px solid rgba(99,214,196,.25); border-radius: 4px;
-            padding: 5px 12px; font-size: 12px;
+            color: var(--text-3); text-decoration: none; cursor: pointer; white-space: nowrap;
+            border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+            padding: 6px 13px; font-size: var(--fs-base);
+            transition: color .15s, background .15s, border-color .15s;
         }
-        .st-home:hover { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
-        .st-brand { font: 500 10px/1.6 ui-monospace, Consolas, monospace; letter-spacing: .28em; color: #63d6c4; }
+        .st-home:hover { color: var(--surface-0); background: var(--accent); border-color: var(--accent); }
+        .st-brand { font: 500 10px/1.6 ui-monospace, Consolas, monospace; letter-spacing: .28em; color: var(--accent); }
         .st-scene-picker { position: relative; }
         .st-scene-trigger {
             display: flex; align-items: center; justify-content: space-between; gap: 10px;
-            min-width: 200px; max-width: 320px; padding: 4px 8px; cursor: pointer;
-            background: rgba(255,255,255,.06); color: #e6f1ef; font-family: inherit; font-size: 12px;
-            border: 1px solid rgba(99,214,196,.3); border-radius: 4px;
+            min-width: 200px; max-width: 320px; padding: 6px 10px; cursor: pointer;
+            background: rgba(255,255,255,.06); color: var(--text-1); font-family: inherit; font-size: var(--fs-base);
+            border: 1px solid var(--accent-line); border-radius: var(--radius-sm);
+            transition: border-color .15s, background .15s;
         }
-        .st-scene-trigger:hover { border-color: rgba(99,214,196,.6); }
-        .st-scene-trigger:focus-visible { outline: 1px solid #63d6c4; outline-offset: 1px; }
+        .st-scene-trigger:hover { border-color: var(--accent); background: rgba(255,255,255,.1); }
+        .st-scene-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
         .st-scene-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .st-scene-caret {
             flex: none; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
@@ -75,17 +122,29 @@
             flex: none; margin-left: auto; padding-left: 10px;
             font: 500 10px/1 ui-monospace, Consolas, monospace; color: rgba(230,241,239,.38);
         }
-        #st-msg { font-size: 12px; color: #e9b96e; }
+        #st-msg { font-size: var(--fs-base); color: var(--gold); }
         #st-msg:empty { display: none; }
-        #st-progress { font: 500 11px/1 ui-monospace, Consolas, monospace; color: rgba(230,241,239,.55); }
+        #st-progress { font: 500 var(--fs-sm)/1 ui-monospace, Consolas, monospace; color: var(--text-3); }
         .st-spacer { flex: 1; }
-        .st-modes { display: flex; gap: 4px; }
-        .st-modes button, #st-save, #st-add-line, #st-full {
-            background: transparent; color: #9fb8b4; cursor: pointer;
-            border: 1px solid rgba(99,214,196,.25); border-radius: 4px;
-            padding: 5px 14px; font-size: 12px;
+        /* 播放/编辑做成一整组分段控件，边界清楚，一眼看出是互斥的两态 */
+        .st-modes {
+            display: flex; gap: 2px; padding: 2px;
+            background: rgba(0,0,0,.32); border: 1px solid var(--hairline); border-radius: var(--radius);
         }
-        #st-full { padding: 5px 12px; }
+        .st-modes button, #st-save, #st-add-line, #st-full {
+            background: transparent; color: var(--text-3); cursor: pointer;
+            border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+            padding: 6px 14px; font-size: var(--fs-base); font-family: inherit;
+            transition: color .15s, background .15s, border-color .15s;
+        }
+        .st-modes button { border-color: transparent; padding: 5px 16px; border-radius: 4px; }
+        .st-modes button:hover { color: var(--text-1); background: var(--accent-soft); }
+        .st-modes button:focus-visible, #st-save:focus-visible, #st-add-line:focus-visible,
+        #st-full:focus-visible, #st-live-toggle:focus-visible {
+            outline: 2px solid var(--accent); outline-offset: 1px;
+        }
+        #st-save:hover:not([disabled]), #st-full:hover:not([disabled]) { color: var(--accent); border-color: var(--accent-line); }
+        #st-full { padding: 6px 13px; }
         #st-full[disabled] { opacity: .4; cursor: default; }
         /* 全屏：顶栏收起，只在右上角留一枚很淡的退出键（Esc 同样有效） */
         html:fullscreen #st-bar { display: none; }
@@ -99,9 +158,13 @@
         }
         #st-full-exit:hover { opacity: 1; color: #e6f1ef; border-color: rgba(99,214,196,.65); }
         html:fullscreen #st-full-exit { display: block; }
-        #st-add-line { padding: 4px 10px; }
-        .st-modes button.is-active { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
+        #st-add-line { padding: 5px 12px; color: var(--accent); border-color: var(--accent-line); }
+        #st-add-line:hover { color: var(--surface-0); background: var(--accent); border-color: var(--accent); }
+        .st-modes button.is-active { color: var(--surface-0); background: var(--accent); border-color: var(--accent); }
         #st-save[disabled] { opacity: .45; cursor: default; }
+        /* 保存按钮就绪态用主色强调，草稿态与可用态一眼可分 */
+        #st-save:not([disabled]) { color: var(--surface-0); background: var(--accent); border-color: var(--accent); }
+        #st-save:not([disabled]):hover { background: #7ee6d6; }
 
         /* ---- 对话 UI：从 main.psb.m 拆出的 MSGWIN / name 两块对象 ----
            世界坐标固定 1920×1080（与游戏 UI 画布同尺），整层按视口等比缩放并居中，
@@ -321,7 +384,7 @@
 
         /* ---- 即时台词面板 ---- */
         #st-live {
-            position: fixed; top: 52px; right: 16px; z-index: 8; width: 320px;
+            position: fixed; top: 56px; right: 18px; z-index: 8; width: 340px;
             max-height: calc(100vh - 68px); overflow-y: auto; padding: 14px;
             background: rgba(6, 18, 24, .96); border: 1px solid rgba(233,185,110,.35);
             border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.5);
@@ -372,20 +435,21 @@
 
         /* ---- 编辑器 ---- */
         #st-editor {
-            position: fixed; top: 44px; bottom: 0; left: 0; right: 0; z-index: 6;
-            display: none; gap: 12px; padding: 16px;
-            background: rgba(4, 12, 17, .72);
+            position: fixed; top: 48px; bottom: 0; left: 0; right: 0; z-index: 6;
+            display: none; gap: 14px; padding: 18px;
+            background: rgba(4, 12, 17, .78);
         }
         html[data-mode="edit"] #st-editor { display: flex; }
         .st-col {
             display: flex; flex-direction: column; min-width: 0; min-height: 0;
-            background: rgba(9, 24, 29, .94); border: 1px solid rgba(99,214,196,.2);
-            border-radius: 8px; padding: 14px;
+            background: var(--surface-1); border: 1px solid var(--hairline);
+            border-radius: var(--radius-lg); padding: 16px;
+            box-shadow: 0 6px 28px rgba(0,0,0,.28);
         }
         .st-col--lines { flex: 1; }
-        .st-col--props { width: 348px; flex: none; }
-        .st-col-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-        .st-col h2 { font-size: 13px; font-weight: 500; color: #63d6c4; }
+        .st-col--props { width: 372px; flex: none; }
+        .st-col-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+        .st-col h2 { font-size: var(--fs-base); font-weight: 500; color: var(--accent); }
         .st-head-ops { display: flex; align-items: center; gap: 6px; }
 
         /* 行列表与 BGM 竖轨共用同一个滚动容器：滚动时段落始终贴着自己的台词行 */
@@ -396,51 +460,65 @@
             flex: 1; min-width: 0; overflow: visible; list-style: none;
             margin: 0; padding: 0 6px 0 0;
         }
-        /* BGM 竖轨：固定宽度，高度由 JS 按行列表内容高度设定；每段按真实行边界定位 */
+        /* BGM 竖轨：固定宽度，高度由 JS 按行列表内容高度设定；每段按真实行边界定位。
+           加宽到 44px 让竖排曲名与区间号真正读得清（拖拽全靠 clientY，与宽度无关）。 */
         .st-bgm-track {
-            flex: none; width: 30px; position: relative; align-self: flex-start;
-            border-radius: 4px;
-            background: linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px) 0 0 / 100% var(--bgm-row-h, 38px);
+            flex: none; width: 44px; position: relative; align-self: flex-start;
+            border-radius: var(--radius-sm);
+            background: linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px) 0 0 / 100% var(--bgm-row-h, 38px);
+            border: 1px solid rgba(226,164,95,.14);
         }
         .st-bgm-seg {
-            position: absolute; left: 3px; right: 3px;
-            background: rgba(226,164,95,.18); border: 1px solid rgba(226,164,95,.5);
-            border-radius: 4px; cursor: grab; touch-action: none;
-            transition: background .12s, border-color .12s;
+            position: absolute; left: 4px; right: 4px;
+            background: linear-gradient(180deg, var(--amber-soft), rgba(226,164,95,.22));
+            border: 1px solid var(--amber-line);
+            border-radius: var(--radius-sm); cursor: grab; touch-action: none;
+            transition: background .14s, border-color .14s, box-shadow .14s;
         }
-        .st-bgm-seg:hover { background: rgba(226,164,95,.28); }
-        .st-bgm-seg.is-at { background: rgba(226,164,95,.34); border-color: #e2a45f; }
-        .st-bgm-seg.is-sel { background: rgba(226,164,95,.42); border-color: #ffd08a; box-shadow: 0 0 0 1px rgba(255,208,138,.5); }
+        .st-bgm-seg:hover { background: rgba(226,164,95,.3); border-color: var(--amber); }
+        .st-bgm-seg.is-at { background: rgba(226,164,95,.36); border-color: var(--amber); }
+        .st-bgm-seg.is-sel {
+            background: rgba(226,164,95,.46); border-color: #ffd08a;
+            box-shadow: 0 0 0 2px rgba(255,208,138,.4), 0 0 14px rgba(226,164,95,.28);
+        }
         .st-bgm-seg.is-drag { cursor: grabbing; opacity: .85; }
-        /* 竖轨窄，曲名竖排才能读；底部留给区间号 */
+        /* 竖轨窄，曲名竖排才能读；顶部留出拖拽把手、底部留给区间号 */
         .st-bgm-seg-name {
-            position: absolute; top: 4px; bottom: 13px; left: 0; right: 0;
-            writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: .5px;
-            font: 500 9px/1.15 ui-monospace, Consolas, monospace; color: #ffd9a8;
+            position: absolute; top: 8px; bottom: 16px; left: 0; right: 0;
+            writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: 1px;
+            font: 500 11px/1.2 ui-monospace, Consolas, monospace; color: #ffe0b8;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
             text-align: center; pointer-events: none;
         }
         .st-bgm-seg-range {
-            position: absolute; bottom: 2px; left: 0; right: 0;
-            font: 500 8px/1 ui-monospace, Consolas, monospace; color: rgba(255,217,168,.65);
+            position: absolute; bottom: 3px; left: 0; right: 0;
+            font: 600 10px/1 ui-monospace, Consolas, monospace; color: #ffd9a8;
             text-align: center; pointer-events: none;
         }
-        /* 上下边缘：拖它改区间端点；整条其余区域拖它平移 */
+        /* 上下边缘：拖它改区间端点；整条其余区域拖它平移。加宽加高便于命中 */
         .st-bgm-grip {
             position: absolute; left: 50%; transform: translateX(-50%);
-            width: 24px; height: 7px; border-radius: 4px; cursor: ns-resize;
-            background: #e2a45f; opacity: .8;
+            width: 34px; height: 10px; border-radius: 5px; cursor: ns-resize;
+            background: linear-gradient(180deg, #f0bd82, var(--amber));
+            box-shadow: 0 1px 3px rgba(0,0,0,.4);
+            opacity: .9; transition: opacity .12s, filter .12s;
         }
-        .st-bgm-grip:hover { opacity: 1; }
-        .st-bgm-grip--top { top: -4px; }
-        .st-bgm-grip--bottom { bottom: -4px; }
+        .st-bgm-grip::after {
+            content: ''; position: absolute; left: 50%; top: 50%;
+            width: 14px; height: 2px; transform: translate(-50%,-50%);
+            background: rgba(11,31,38,.7); border-radius: 1px;
+        }
+        .st-bgm-grip:hover { opacity: 1; filter: brightness(1.15); }
+        .st-bgm-grip--top { top: -5px; }
+        .st-bgm-grip--bottom { bottom: -5px; }
         .st-line {
-            display: flex; align-items: center; gap: 8px;
-            padding: 7px 8px; margin-bottom: 2px; border-radius: 5px;
+            display: flex; align-items: center; gap: 9px;
+            padding: 9px 10px; margin-bottom: 3px; border-radius: var(--radius-sm);
             border: 1px solid transparent; cursor: pointer;
+            transition: background .12s, border-color .12s;
         }
-        .st-line:hover { background: rgba(99,214,196,.07); }
-        .st-line.is-sel { background: rgba(99,214,196,.13); border-color: rgba(99,214,196,.4); }
+        .st-line:hover { background: rgba(99,214,196,.09); }
+        .st-line.is-sel { background: var(--accent-soft); border-color: var(--accent-line); }
         .st-line.is-drag { opacity: .35; }
         .st-grip {
             flex: none; width: 8px; height: 14px; cursor: grab;
@@ -448,15 +526,15 @@
             background-size: 4px 4px;
         }
         .st-line-idx {
-            flex: none; width: 20px; text-align: right;
-            font: 500 10px/1 ui-monospace, Consolas, monospace; color: rgba(230,241,239,.4);
+            flex: none; width: 22px; text-align: right;
+            font: 500 var(--fs-sm)/1 ui-monospace, Consolas, monospace; color: var(--text-4);
         }
         .st-line-role {
-            flex: none; width: 74px; font-size: 12px; color: #63d6c4;
+            flex: none; width: 78px; font-size: var(--fs-base); font-weight: 500; color: var(--accent);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .st-line-text {
-            flex: 1; min-width: 0; font-size: 12.5px; color: #cddad7;
+            flex: 1; min-width: 0; font-size: var(--fs-base); color: var(--text-2);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         /* 行内背景槽：拖图库里的背景到这里＝本行背景覆盖，缩略图常驻显示 */
@@ -485,28 +563,43 @@
         }
         .st-line-ops button:hover { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
 
-        #st-props { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
-        .st-sec { margin-bottom: 18px; }
+        #st-props { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; }
+        #st-props::-webkit-scrollbar { width: 7px; }
+        #st-props::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 4px; }
+        .st-sec {
+            margin-bottom: 22px; padding: 12px 14px 14px;
+            background: rgba(0,0,0,.16); border: 1px solid rgba(99,214,196,.12);
+            border-radius: var(--radius);
+        }
+        /* 每个分区一条左侧色条 + 底部细分隔，标题与内容的作用域一眼可辨 */
         .st-sec h3 {
-            font-size: 11px; font-weight: 500; letter-spacing: .08em;
-            color: rgba(99,214,196,.85); margin-bottom: 8px;
+            display: flex; align-items: center; gap: 8px;
+            font-size: var(--fs-base); font-weight: 500; letter-spacing: .04em;
+            color: var(--accent); margin: 0 0 12px; padding-bottom: 9px;
+            border-bottom: 1px solid var(--hairline);
         }
-        .st-field { display: block; margin-bottom: 9px; font-size: 11px; color: rgba(230,241,239,.6); }
-        .st-field > span { display: block; margin-bottom: 4px; }
+        .st-sec h3::before {
+            content: ''; flex: none; width: 3px; height: 14px; border-radius: 2px;
+            background: var(--accent);
+        }
+        .st-field { display: block; margin-bottom: 11px; font-size: var(--fs-md); color: var(--text-3); }
+        .st-field > span { display: block; margin-bottom: 5px; line-height: 1.4; }
         .st-field input, .st-field select, .st-field textarea, .st-bg-search-row input {
-            width: 100%; background: rgba(0,0,0,.35); color: #dceae7;
-            border: 1px solid rgba(99,214,196,.2); border-radius: 4px;
-            padding: 6px 8px; font-size: 12px; font-family: inherit;
+            width: 100%; background: var(--surface-2); color: var(--text-1);
+            border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+            padding: 7px 9px; font-size: var(--fs-base); font-family: inherit;
+            transition: border-color .15s, box-shadow .15s;
         }
-        .st-field textarea { resize: vertical; min-height: 70px; line-height: 1.6; }
+        .st-field textarea { resize: vertical; min-height: 72px; line-height: 1.6; }
         .st-field input:focus, .st-field select:focus, .st-field textarea:focus, .st-bg-search-row input:focus {
-            outline: none; border-color: rgba(99,214,196,.6);
+            outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
         }
+        .st-field input:hover, .st-field select:hover { border-color: var(--hairline-2); }
         .st-field select:disabled, .st-field input:disabled { opacity: .45; }
-        .st-field input::placeholder, .st-bg-search-row input::placeholder { color: rgba(230,241,239,.28); }
+        .st-field input::placeholder, .st-bg-search-row input::placeholder { color: var(--text-4); }
         /* 原生下拉展开项也用深色，和顶栏自定义场景菜单一致（不再弹白菜单） */
-        select option { background: #0c1c22; color: #dceae7; }
-        .st-field-note { font-style: normal; font-size: 10px; color: rgba(230,241,239,.32); margin-left: 4px; }
+        select option { background: #0c1c22; color: var(--text-1); }
+        .st-field-note { font-style: normal; font-size: var(--fs-sm); color: var(--text-4); margin-left: 5px; }
         /* 背景：预览缩略图 + 搜索框 + 图库（拖拽源）。搜索框过滤图库，点图库项＝场景背景，拖到行内＝行覆盖 */
         .st-bg-field > span { margin-bottom: 5px; }
         .st-bg-preview {
@@ -544,9 +637,9 @@
         .st-bg-item.is-current { border-color: #e9b96e; box-shadow: 0 0 0 1px #e9b96e; }
         .st-bg-item.is-missing { background: repeating-linear-gradient(45deg, #16262b, #16262b 6px, #1b2f35 6px, #1b2f35 12px); }
         .st-bg-item span {
-            position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 3px;
-            font: 500 8px/1.2 ui-monospace, Consolas, monospace; color: #dceae7;
-            background: rgba(4,12,17,.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 4px;
+            font: 500 10px/1.2 ui-monospace, Consolas, monospace; color: var(--text-1);
+            background: rgba(4,12,17,.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         /* BGM 曲目清单：拖到剧本行右侧竖轨即落一段 */
         .st-bgm-field { margin-top: 12px; }
@@ -568,9 +661,9 @@
         .st-bgm-file-ico { flex: none; color: #e2a45f; font-size: 13px; }
         .st-bgm-file-name {
             min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-            font: 500 10px/1.2 ui-monospace, Consolas, monospace;
+            font: 500 var(--fs-md)/1.2 ui-monospace, Consolas, monospace;
         }
-        .st-bgm-empty { padding: 10px 6px; font-size: 10px; color: rgba(230,241,239,.4); text-align: center; }
+        .st-bgm-empty { padding: 10px 6px; font-size: var(--fs-md); color: var(--text-3); text-align: center; }
         /* 点竖轨上的段才出现：试听 / 删除 / 覆盖句（如 1–3） */
         .st-bgm-detail {
             margin-top: 8px; padding: 8px; border-radius: 4px;
