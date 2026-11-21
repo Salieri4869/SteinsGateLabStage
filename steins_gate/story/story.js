@@ -1199,9 +1199,22 @@
     function lines() { return (state.scene && state.scene.lines) || []; }
     function currentLine() { return lines()[state.idx] || null; }
 
+    /* 句末齿轮显隐：仅「播放态 + 非 AUTO + 窗口已铺好 + 有台词 + 打字已完成」时显示。
+       打字过程中不显示，打完那一刻才出现（原作「按键等待」语义），随后一直转到翻页。
+       AUTO 打开 / 编辑态 / 即时台词 / 全剧终 / 开场动画中 → 隐藏。 */
+    function syncGear() {
+        var show = state.mode === 'play'
+                && !state.autoOn && !state.ended && !state.liveOpen && !state.introPending
+                && !state.typing
+                && (($('st-text-txt').textContent || '').length > 0)
+                && !!window.SGDialog && window.SGDialog.isOpen();
+        if (window.SGDialog) window.SGDialog.setGear(show);
+    }
+
     function clearTimers() {
         if (state.typeTimer) { clearTimeout(state.typeTimer); state.typeTimer = null; }
         if (state.autoTimer) { clearTimeout(state.autoTimer); state.autoTimer = null; }
+        if (window.SGDialog) window.SGDialog.setGear(false);
         state.seq++;
     }
 
@@ -1262,9 +1275,9 @@
 
     /* 按固定速度打字；语音各走各的播放器，不必互相等待 */
     function typeText(text, done) {
-        var el = $('st-text');
+        var el = $('st-text-txt');
         el.textContent = '';
-        if (window.SGDialog) window.SGDialog.setCaret(false);   // 打字中先不亮 ▼
+        if (window.SGDialog) { window.SGDialog.setCaret(false); window.SGDialog.setGear(false); }  // 打字中：▼ 与句末齿轮都灭
         state.typing = true;
         state.typeDone = done;
         state.seq++;
@@ -1277,6 +1290,7 @@
                 var cb = state.typeDone;
                 state.typeDone = null;
                 if (cb) cb();
+                syncGear();   // 打完这一刻：句末齿轮出现，进入段从帧 0 开始播
                 return;
             }
             el.textContent += text.charAt(i++);
@@ -1291,7 +1305,8 @@
         if (state.typeTimer) { clearTimeout(state.typeTimer); state.typeTimer = null; }
         state.typing = false;
         var line = currentLine();
-        $('st-text').textContent = (line && line.text) || '';
+        $('st-text-txt').textContent = (line && line.text) || '';
+        syncGear();
         var cb = state.typeDone;
         state.typeDone = null;
         if (cb) cb();
@@ -1334,7 +1349,8 @@
     }
 
     function onTyped(line, voiceMs) {
-        if (window.SGDialog) window.SGDialog.setCaret(state.mode === 'play' && !state.autoOn);
+        if (window.SGDialog) window.SGDialog.setCaret(false);   // ▼ 常灭：等待提示由句末齿轮承担
+        syncGear();
         if (state.mode !== 'play') { setHint(''); return; }
         state.autoReady = true;
         armAuto(voiceMs);
@@ -1362,8 +1378,9 @@
         paintAutoBtn();
         // 装饰线的「充能」只在 AUTO 下跑，其余时候只有一层静态暗描边
         if (window.SGDialog) window.SGDialog.setAuto(state.autoOn);
-        // 自动推进时不需要「点击继续」的提示符
-        if (window.SGDialog) window.SGDialog.setCaret(!state.autoOn && !state.typing);
+        // 句末齿轮只在非 AUTO 下出现，AUTO 打开即隐藏；▼ 常灭
+        if (window.SGDialog) window.SGDialog.setCaret(false);
+        syncGear();
         try { localStorage.setItem(AUTO_KEY, state.autoOn ? '1' : '0'); } catch (_) { /* 隐私模式 */ }
         if (state.mode !== 'play') { setHint(''); return; }
         if (!state.autoOn && state.autoTimer) { clearTimeout(state.autoTimer); state.autoTimer = null; }
@@ -1383,9 +1400,10 @@
         stopBgm();   // 全剧终：BGM 收尾
         state.ended = true;
         state.typing = false;
-        $('st-text').textContent = '— 完 —';
+        if (window.SGDialog) window.SGDialog.setCaret(true);   // 全剧终无台词，齿轮让位给 ▼
+        $('st-text-txt').textContent = '— 完 —';
+        syncGear();
         setHint('点击重新开始');
-        if (window.SGDialog) window.SGDialog.setCaret(true);
         setProgress();
     }
 
@@ -1442,10 +1460,11 @@
 
         if (silent) {
             // 整句直接落字，不打字、不播语音；AUTO 当作这句已显示完继续计时
-            $('st-text').textContent = line.text || '';
+            $('st-text-txt').textContent = line.text || '';
             state.typing = false;
             state.typeDone = null;
-            if (window.SGDialog) window.SGDialog.setCaret(state.mode === 'play' && !state.autoOn);
+            if (window.SGDialog) window.SGDialog.setCaret(false);   // ▼ 常灭，等待提示由句末齿轮承担
+            syncGear();
             state.autoReady = true;
             state.lineVoice = Promise.resolve(0);
             armAuto(0);
@@ -1599,7 +1618,8 @@
         if (state.ctx) stopVoices();
         $('st-name').classList.remove('is-alias');
         if (window.SGDialog) window.SGDialog.setName(castName(state.liveRole));
-        $('st-text').textContent = '';
+        $('st-text-txt').textContent = '';
+        syncGear();   // 即时台词模式：齿轮隐藏
         setHint('即时台词模式');
         liveMsg('');
     }
@@ -1709,7 +1729,7 @@
             if (mySeq === state.seq) liveMsg(err.message || '语音播放失败', true);
         });
 
-        var el = $('st-text');
+        var el = $('st-text-txt');
         el.textContent = '';
         var i = 0;
         (function tick() {
@@ -2912,6 +2932,10 @@
     function playDialogIntro(done) {
         if (!state.dialog) { if (done) done(); return; }
         state.dialog.fit();       // 视口可能变过（全屏/缩放），先按当前尺寸摆好
+        /* 预置首句名牌：擦入动画由 open() 的 50–58 帧统一负责，文字先就位，
+           这样开场播完 renderLine(0) 的 setName 看到名字没变就不会再擦一遍。 */
+        var firstName = displayNameAt(0);
+        if (firstName) state.dialog.primeName(firstName);
         state.dialog.open(done);
     }
 

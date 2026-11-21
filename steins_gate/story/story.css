@@ -178,10 +178,6 @@
         html[data-mode="edit"] #st-hud { display: none; }
         #st-hud .hud-ly { position: absolute; }
         #st-hud .hud-ly img { display: block; width: 100%; height: 100%; }
-        /* tex#000-texture.png 里上下排着 5 块 1920×290 的对话框层，全部拆成 webp：
-             1_lines 白色电路线 / 2_grad 灰渐变窗底 / 3_dark 深色窗芯 /
-             4_dim 暗灰电路线 / 5_mid 中间调电路线。
-           开场 60 帧按「白线两侧擦入 → 铺满 → 转灰、黑窗芯显现 → 白线收走、装饰上线」叠放。 */
         #st-hud .hud-win,
         #st-hud .hud-lines,
         #st-hud .hud-dark,
@@ -189,11 +185,29 @@
         #st-hud .hud-mid { left: 0; top: 790px; width: 1920px; height: 290px; }
         #st-hud .hud-lines, #st-hud .hud-dark,
         #st-hud .hud-dim, #st-hud .hud-mid { opacity: 0; }
-        /* 四层的透明度与擦除遮罩全由 sg-dialog.js 的 paintWindow(t) 逐帧写入，这里只给初始隐藏态。 */
         #st-hud .hud-deco  { left: 434px; top: 1022px; width: 1053px; height: 56px; opacity: 0; }
         #st-hud .hud-name  { top: 1014px; height: 59px; }
-        /* 白闪层：擦入时领先底板半个身位，收尾淡掉，位置由脚本同步 */
+        /* 名牌底板 s/m/l/ll 四档合成一张 1704×59 雪碧图（内联雪碧图，与 gear_wait 同理）：
+           s@0 / m@226 / l@592 / ll@1058。JS 按档位写 width + background-position。 */
+        #st-hud .hud-name,
+        #st-hud .hud-name-w {
+            background: url(ui/nameplate_sheet.webp) no-repeat 0 0 / 1704px 59px;
+        }
+        /* 白闪层：原作里名牌底板是 mesh 形变展开的（菱形→纺锤→六边形），
+           已从「领先半个身位的擦除白闪」改为形变层 .hud-name-morph；
+           这层保留 DOM 仅为兼容旧探针/调试，永远隐藏，不参与画面。 */
         #st-hud .hud-name-w { top: 1014px; height: 59px; opacity: 0; }
+
+        /* 名牌 mesh 形变层：纯白六边形，由脚本逐帧写 clip-path 顶点，
+           从正菱形展开成横向纺锤再压平成六边形（对应原作 name 的 mesh 顶点动画），
+           展开完成淡出、交接给下面带网点纹理的正式底板。
+           几何用 1920 画布像素写死，left/width 由 layoutPlate 按档位摆；
+           top=1014 与底板一致，clip-path 顶点垂直方向在 59px 盒内计算。 */
+        #st-hud .hud-name-morph {
+            top: 1014px; height: 59px;
+            background: #fff;
+            will-change: clip-path, opacity;
+        }
 
         /* 名牌两侧装饰线（原素材：tex#000 的 main/名前飾り 1053×56）分两个状态：
              idle   deco_dim.webp —— 游戏原样的那层淡描边（黑填充 α≈36 / 白描边 α≈120），AUTO 关掉时的常态，完全静止
@@ -340,6 +354,26 @@
         }
         #st-caret.is-off { display: none; }
         @keyframes st-caret-blink { 0%, 55% { opacity: .85; } 56%, 100% { opacity: .1; } }
+
+        /* 句末持续旋转的齿轮：原作 main.psb.m 的「キー待ちアイコンアニメ」（按键等待图标），
+           37 帧逐帧烘焙成 1850×50 的雪碧图（每帧 50×50），缩到 32px 高（1184×32）。
+           帧推进由 sg-dialog.js 的 rAF 驱动：0–16 变形进入帧播一次，17–36 完整旋转帧循环，
+           这里不能用 CSS animation steps 循环全部帧（否则每轮都重播变形帧）。
+           位置由 alignGear() 量最后一个字符贴过去——inline 在长句占满行时会被挤到下一行行首。
+           打字打完才出现、一直转；仅非 AUTO 播放态显示。 */
+        #st-gear {
+            position: absolute; left: 0; top: 0; width: 32px; height: 32px;
+            background: url(ui/gear_wait.webp) no-repeat 0 0 / 1184px 32px;   /* 1850×50 等比缩到 32 高 */
+            image-rendering: pixelated;
+            filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 3px rgba(0,0,0,.9));
+            pointer-events: none;
+        }
+        #st-gear.is-off { display: none; }
+        /* 窗口没铺好前别让齿轮跟着文字一起露头（#st-text 本身不受 is-open 限制） */
+        #st-hud:not(.is-open) #st-gear { visibility: hidden; }
+        @media (prefers-reduced-motion: reduce) {
+            #st-gear { animation: none; }
+        }
 
         /* 对话框左下角的 AUTO：直接用 main.psb.m 里 pcbt_auto_* 的四态切片
            （off 白字未开 / on 橙字已开 / no 灰暗不可用 / stop 灰字红斜杠）。

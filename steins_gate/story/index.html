@@ -63,10 +63,16 @@
         <div class="hud-ly hud-mid" data-hud="mid"><img src="ui/msgwin_5_mid.webp" alt=""></div>
         <div class="hud-ly hud-lines" data-hud="lines"><img src="ui/msgwin_1_lines.webp" alt=""></div>
         <div class="hud-ly hud-deco" data-hud="deco"></div>
-        <div class="hud-ly hud-name-w" data-hud="name-white"><img src="ui/nameplate_l.webp" alt=""></div>
-        <div class="hud-ly hud-name" data-hud="name"><img src="ui/nameplate_l.webp" alt=""></div>
+        <!-- 名牌四档 s/m/l/ll 合在同一张雪碧图里，按档位平移 background-position 取用（见 story.css / sg-dialog.js） -->
+        <div class="hud-ly hud-name-w" data-hud="name-white"></div>
+        <div class="hud-ly hud-name" data-hud="name"></div>
+        <!-- 名牌 mesh 形变层：菱形→横向纺锤→六边形的纯白 clip-path 展开，
+             展开完淡出交接给上面的正式底板（见 story.css / sg-dialog.js morphPolygon） -->
+        <div class="hud-ly hud-name-morph" data-hud="name-morph"></div>
         <div id="st-name"></div>
-        <div id="st-text"></div>
+        <!-- 台词文字放独立 span：齿轮作为 inline 元素紧跟在文字末尾（原作「广播馆的楼顶。◉」那种句末跟随），
+             打字机只改 #st-text-txt，不会覆盖掉齿轮。 -->
+        <div id="st-text"><span id="st-text-txt"></span><span id="st-gear" class="is-off" aria-hidden="true"></span></div>
         <span id="st-hint"></span>
         <div id="st-caret" class="is-off"></div>
         <div id="st-autoslot" aria-hidden="true">

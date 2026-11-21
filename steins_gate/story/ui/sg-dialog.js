@@ -15,7 +15,10 @@
  *    MSGWIN.deco_show：装饰线从中心向外擦开（29 帧），白线闪层收尾
  *                      → AUTO 打开时装饰线跑「充能」：上排从左往右铺满、下排从名牌中心向两侧展开，
  *                        都亮起后下排先收、上排再从左往右收走；AUTO 关掉只是静止的淡描边
- *    name      20 帧：名牌底板擦入（白闪层领先半个身位，收尾时淡掉）
+ *    name      20 帧：名牌底板走 mesh 形变 —— 正菱形→横向纺锤→六边形（纯白形变层展开，
+ *                    末段淡出交接给带网点纹理的正式底板，文字随后浮现）。截图实测三态：
+ *                    菱形≈终态 1/7 宽、四角皆尖；纺锤左右拉到全宽、上下仍尖；
+ *                    六边形顶边展开到约 82%、左右斜切 19px（正是底板素材轮廓）。
  *
  *  坐标系：一律 1920×1080，跟游戏的 UI 画布一致；整层按视口缩放居中，
  *          #st-hud 上挂 transform，内部元素全部写绝对像素。
@@ -32,6 +35,7 @@
 
     var PLATE = { s: 226, m: 366, l: 466, ll: 646 };
     var PLATE_ORDER = ['s', 'm', 'l', 'll'];
+    var PLATE_X = { s: 0, m: 226, l: 592, ll: 1058 };   // 各档在 nameplate_sheet.webp 里的横向偏移
     var PLATE_CX = 957;               // 名牌中心 = 960 + coord(-3)
     var PLATE_TOP = 1014;             // 名牌顶边（底边 1073）
     var NAME_PAD = 56;                // 左右对称留白：文字按底板几何中心居中
@@ -177,58 +181,105 @@
         if (st.auto && st.open > 58) runDeco();
     }
 
-    /* 60 帧窗口开场，5 层素材全部参与（都是 tex#000 里同一张 1920×290 的五个变体）：
-         0–18   白色电路线从左右两头往中间擦入（录像第 1→2 帧：先是稀疏边框/角标，再铺满）
-         14–34  中间调电路线淡入，把纯白线过渡成灰白（第 3 帧）
-         20–46  深色窗芯从正中向两侧撑开、暗灰电路线随后亮起（第 3→4 帧的黑窗口与倒 V 装饰）
-         46–59  四层电路线/窗芯陆续淡出，窗口回到 MSGWIN.normal 的干净常态（第 5 帧）
-         50–58  装饰线与名牌淡入
-       PSB 的 MSGWIN.show 里 線のみ / 線のみ反転 是同一张 white 用两个内置遮罩擦入、擦出；
-       MSGWIN.normal 只留 ウィンドウ 一层 —— 所以常态不该有铺满的电路线。 */
+    /* 窗口开场 —— 严格照 PSB 的 MSGWIN.show（main.psb.m.json 实测）复现：
+       可见贴图只有 2 张（sourceIconRenameMap 铁证）：
+         main/white     → tex#000 icon 0008 = msgwin_1_lines.webp（白电路线）
+         main/ウィンドウ → tex#000 icon 0009 = msgwin_2_grad.webp（灰渐变窗底）
+       而 0348/0355/0356（旧代码当"深色窗芯/暗灰线/中间调线"叠上去的）= #mask/1/#mask/8/#mask/9，
+       是 e-mote 的内置擦除遮罩图案，show 根本没把它们当可见层 —— 旧代码把遮罩当贴图叠，是错的。
+
+       三个擦除层与 stc.wrt（mask=2 → #mask/2 = 0349，一个"中间亮、两侧暗"的纺锤形 alpha）：
+         ベースグラデ（窗底 ウィンドウ）  wrt 1→0  t=0..59  擦入
+         線のみ     （白线 white）        wrt 1→0  t=0..29  擦入
+         線のみ反転 （白线 white，同一张） wrt 0→1  t=30..59 擦出
+       wrt 是线性插值（show 三层都没引用缓动曲线，easing 全文只出现 1 次且是定义），
+       所以这里也用线性。#mask/2 的位移算法在 e-mote 引擎内部，PSB 只给了 0349 图案纹理、
+       没有位移规则，无法精确还原；这里保留已验证的 wipeSides 对称软边近似"两侧点亮、中间合拢"。
+       50–58 帧装饰线/名牌淡入（deco_show/name_on 段）。 */
     function paintWindow(t) {
         st.open = t;
 
-        wipeSides(el.win, clamp01(t / 59));                 // 灰渐变窗底：0–59 擦入，与 PSB ベースグラデ 同长
+        /* 窗底 ウィンドウ：t 0–59 擦入，与 PSB ベースグラデ wrt 1→0 一致。
+           mask 图案挂在 CSS 的 .hud-win img 上，这里只驱动线性 reveal 进度。 */
+        wipeSides(el.win, clamp01(t / 59));
 
-        var lineIn = clamp01(t / 18);
-        var lineOut = clamp01((t - 26) / 20);
-        var lineReveal = t <= 26 ? lineIn : 1 - lineOut;
-        wipeSides(el.lines, lineReveal);                    // 白线：先对称擦入，再对称擦出
-        fadeLayer(el.lines, lineReveal * 0.9, 1);
+        /* 白线 white：t 0–29 擦入（線のみ wrt 1→0）、t 30–59 擦出（線のみ反転 wrt 0→1）。
+           两张层共用同一张 white 贴图，正/反两个擦除方向 —— 用一个 reveal 曲线表达：
+           reveal 先 0→1 再 1→0，两侧对称擦入擦出。 */
+        var lineReveal = t <= 29 ? clamp01(t / 29) : clamp01(1 - (t - 30) / 29);
+        wipeSides(el.lines, lineReveal);
+        fadeLayer(el.lines, lineReveal, 1);
 
-        var midIn = clamp01((t - 14) / 12);
-        var midOut = clamp01((t - 34) / 14);
-        fadeLayer(el.mid, Math.min(midIn, 1 - midOut) * 0.85, 1);   // 中间调线：白转灰的过渡
+        /* 0348/0355/0356 是遮罩图案，不是可见层：旧实现叠的 dark/dim/mid 三层全部熄灭，
+           它们保留在 DOM 里只为兼容旧版探针/调试对照，不参与画面。 */
+        fadeLayer(el.dark, 0);
+        fadeLayer(el.dim, 0);
+        fadeLayer(el.mid, 0);
 
-        var dimIn = clamp01((t - 28) / 12);
-        var dimOut = clamp01((t - 44) / 14);
-        fadeLayer(el.dim, Math.min(dimIn, 1 - dimOut) * 0.9, 1);     // 暗灰线：第 4 帧的倒 V 装饰
-
-        var darkIn = clamp01((t - 20) / 20);
-        var darkOut = clamp01((t - 44) / 14);
-        openCenter(el.dark, darkIn, 0.92);                  // 深色窗芯：从正中撑开
-        if (el.dark) el.dark.style.opacity = String(darkIn * 0.92 * (1 - darkOut));
-
-        var a = clamp01((t - 50) / 8);
+        /* 装饰线在 50–58 帧露头（原样），名牌 mesh 形变另走 20 帧（t=39→59，与原作 name 20 帧一致）。
+           共用原来的 8 帧会把菱形/纺锤两态压进 0.15 秒、肉眼看不见。 */
+        var decoA = clamp01((t - 50) / 8);
         if (el.deco) {
-            el.deco.style.opacity = String(a);
+            el.deco.style.opacity = String(decoA);
             /* 装饰线在 50 帧露头，同时放跑马灯；窗口收回去时复位，下次开场能重跑 */
-            if (a > 0.02 && !st.decoRun) { st.decoRun = true; runDeco(); }
-            else if (a <= 0.02) st.decoRun = false;
+            if (decoA > 0.02 && !st.decoRun) { st.decoRun = true; runDeco(); }
+            else if (decoA <= 0.02) st.decoRun = false;
         }
-        paintPlate(a);
+        paintPlate(clamp01((t - 39) / 20));
         if (el.hud) el.hud.classList.toggle('is-open', t > 58);
     }
 
-    /* 名牌底板：白闪层领先 6% 擦入、随底板完成而淡掉；名字跟着底板一起显隐 */
+    /* ---------- 名牌 mesh 形变：菱形 → 横向纺锤 → 六边形 ----------
+       素材实测轮廓（s 档 226×59 盒，四档同比）：中腰 y≈25.5、x=2..W-2；
+       顶边 y=6、x=21..W-21；底边 y=45、x=23..W-23。
+       截图三态：菱形宽≈19高≈20（四角皆尖、近正方）；纺锤顶边仅 13px、左右拉满；
+       六边形顶边≈82%（正是素材）。
+       6 顶点统一为「左上、右上、右中、右下、左下、左中」顺时针六点，三段插值，
+       中间给纺锤一个停留段（原作录像里它是独立存在的中间帧，不该一闪而过）：
+         0→0.45    拉宽：菱形→纺锤（左右尖从中心拉到 x=2..W-2，上下短边仍窄）
+         0.45→0.60 纺锤停留
+         0.60→1    压平：纺锤→六边形（上下短边展开到素材的 21px）
+       菱形/纺锤的上下边收缩成尖点时，相邻两点重合，得到真菱形。
+       终态六边形与底板素材轮廓重合，末段交接无跳变。 */
+    var MORPH_WIDEN = 0.45, MORPH_HOLD = 0.60;
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function morphPolygon(v, W) {
+        var cx = W / 2, mid = 25.5;
+        var r0 = 16;     // 菱形水平半宽（截图≈19/2，近正方）
+        var narrow = 7;  // 纺锤上下短边半宽（截图顶边 13px 的一半）
+        // 六点：左上、右上、右中、右下、左下、左中
+        var k0 = [[cx, 9.5], [cx, 9.5], [cx + r0, mid],
+                  [cx, 41.5], [cx, 41.5], [cx - r0, mid]];
+        var k1 = [[cx - narrow, 10], [cx + narrow, 10], [W - 2, mid],
+                  [cx + narrow, 41], [cx - narrow, 41], [2, mid]];
+        var k2 = [[21, 6], [W - 21, 6], [W - 2, mid],
+                  [W - 23, 45], [23, 45], [2, mid]];
+        var from, to, t;
+        if (v <= MORPH_WIDEN) { from = k0; to = k1; t = clamp01(v / MORPH_WIDEN); }
+        else if (v <= MORPH_HOLD) { from = k1; to = k1; t = 0; }
+        else { from = k1; to = k2; t = clamp01((v - MORPH_HOLD) / (1 - MORPH_HOLD)); }
+        var pts = [];
+        for (var i = 0; i < 6; i++) {
+            pts.push(lerp(from[i][0], to[i][0], t).toFixed(1) + 'px ' + lerp(from[i][1], to[i][1], t).toFixed(1) + 'px');
+        }
+        return 'polygon(' + pts.join(',') + ')';
+    }
+
+    /* 名牌底板 + mesh 形变：形变层在前 84% 从菱形展开到六边形（纯白），
+       末段 84%→100% 形变层淡出、正式底板淡入（两者六边形轮廓重合），文字随后浮现。 */
     function paintPlate(v) {
         st.plate = clamp01(v);
-        wipe(el.name, st.plate);
-        if (el.nameText) el.nameText.style.opacity = String(st.plate);
-        if (el.nameWhite) {
-            wipe(el.nameWhite, clamp01((st.plate - 0.06) / 0.94), 12);
-            el.nameWhite.style.opacity = String(1 - st.plate);
+        var p = st.plate;
+        var W = st.plateW || PLATE.s;
+        if (el.nameMorph) {
+            el.nameMorph.style.clipPath = morphPolygon(clamp01(p / 0.84), W);
+            el.nameMorph.style.webkitClipPath = el.nameMorph.style.clipPath;
+            el.nameMorph.style.opacity = String(1 - clamp01((p - 0.84) / 0.16));
+            el.nameMorph.style.visibility = p <= 0.001 ? 'hidden' : 'visible';
         }
+        fadeLayer(el.name, clamp01((p - 0.84) / 0.16));
+        if (el.nameText) el.nameText.style.opacity = String(clamp01((p - 0.7) / 0.3));
+        if (el.nameWhite) el.nameWhite.style.opacity = '0';
     }
 
     /* 线性补间：起点用调用时刻的 performance.now()，不用 rAF 的 ts。
@@ -277,15 +328,14 @@
     function layoutPlate(spec) {
         var left = PLATE_CX - spec.width / 2;
         st.plateW = spec.width;
-        [el.name, el.nameWhite].forEach(function (n) {
+        [el.name, el.nameWhite, el.nameMorph].forEach(function (n) {
             if (!n) return;
             n.style.left = left + 'px';
             n.style.width = spec.width + 'px';
             n.style.top = PLATE_TOP + 'px';
+            n.style.backgroundPosition = (-PLATE_X[spec.size]) + 'px 0';   // 雪碧图按档位取片
             n.__wipeW = 0;                  // 宽度换档了：让 wipe 下次重新量一次
         });
-        el.nameImg.src = opt.base + 'nameplate_' + spec.size + '.webp';
-        el.nameWhiteImg.src = el.nameImg.src;
         /* 文字盒 = 整块底板：水平居中交给 flex，位置就恒等于底板中心 */
         el.nameText.style.left = left + 'px';
         el.nameText.style.width = spec.width + 'px';
@@ -329,8 +379,11 @@
         span.textContent = text;
     }
 
-    /* 换名字：空名字就把名牌整块收起来（与游戏里没记名字的行一致） */
-    function setName(text) {
+    /* 换名字：空名字就把名牌整块收起来（与游戏里没记名字的行一致）。
+       prime=true 只把名字文字与底板档位摆好、不触发擦入 —— 开场动画开始前预置首句名字用：
+       名牌的擦入由 open() 的第 50–58 帧统一负责，预置后 renderLine 的首个 setName
+       看到名字没变就不会再擦一遍（否则名牌动画会播两次）。 */
+    function setName(text, prime) {
         if (!el.hud) return;
         var name = (text == null ? '' : String(text)).trim();
         if (!name) {
@@ -345,6 +398,7 @@
         st.name = name;
         setNameText(name);
         layoutPlate(pickPlate(name));
+        if (prime) return;   // 预置：只摆文字与尺寸，显隐交给开场/后续 setName
         if (st.open <= 58) return;   // 开场还没铺完：显隐由 open() 的 60 帧自己推，别抢
         if (el.deco) el.deco.style.opacity = '1';
         // 换了名字就重擦一次名牌；装饰线的扫光一直在循环跑，不打断它
@@ -367,6 +421,8 @@
                极宽/超宽视口下不会把窗口条顶出画面 */
             var s = Math.min(global.innerWidth / W, global.innerHeight / 800);
             el.hud.style.transform = 'translate(-50%, 0) scale(' + s + ')';
+            /* transform 变了：齿轮是按屏幕坐标量出来贴句末的，缩放后要重贴一次 */
+            if (el.gear && !el.gear.classList.contains('is-off')) alignGear();
         });
     }
 
@@ -374,6 +430,73 @@
         st.caret = !!on;
         if (!el.hud) return;
         if (el.caret) el.caret.classList.toggle('is-off', !st.caret);
+    }
+
+    /* 把句末齿轮贴到台词最后一个字符的右边：用 Range 量出最后一个字符的屏幕矩形，
+       和 #st-text 的屏幕矩形相减，再除以 hud 的缩放比，得到 #st-text 内的局部坐标。
+       打字机每写一个字都会调一次，所以齿轮始终跟着末尾走；长句换行也贴最后一行行尾，
+       不会像 inline 元素那样被挤到下一行行首。取不到字符/字体未就绪时静默跳过。 */
+    function alignGear() {
+        if (!el.gear || !el.textRun || !el.text) return;
+        var txt = el.textRun.firstChild;
+        if (!txt || !txt.nodeValue) return;
+        var range = document.createRange();
+        try { range.selectNodeContents(el.textRun); } catch (_) { return; }
+        var rects = range.getClientRects();
+        if (!rects || !rects.length) return;
+        var last = rects[rects.length - 1];              // 最后一个字符（换行时是最后一行行尾）
+        var host = el.text.getBoundingClientRect();
+        /* hud 用 transform: scale(s) 缩放：屏幕矩形差要除以 s 才是 #st-text 的局部像素。
+           s 用 hud 的实宽 / 设计宽（1920）算，transform-origin 不影响宽度的比例。 */
+        var s = el.hud.getBoundingClientRect().width / W || 1;
+        var gap = 8;                                     // 齿轮与末字之间的小间距
+        var x = (last.right - host.left) / s + gap;
+        var y = (last.top + last.height / 2 - host.top) / s - 16;   // 32px 齿轮中心对齐字中线
+        el.gear.style.left = x.toFixed(2) + 'px';
+        el.gear.style.top = y.toFixed(2) + 'px';
+    }
+
+    /* 句末齿轮逐帧播放。原作 main.psb.m 的 MSGWIN/wait：
+         frameList 0–36 共 37 帧，loopTime=17 —— 0–16 是变形进入段（齿轮从一条线张开成圆），
+         只播一次；17–36 是完整不变形的旋转帧，循环。帧内已烘焙旋转造型，不用 CSS rotate。
+         注意不能用单条 CSS steps 从 0 循环全部帧：那样每轮都会把「一条线」的变形帧播一遍。
+       所以 JS 驱动：frame 从 0 递增，到 36 后跳回 17，进入段自然只走一次。 */
+    var GEAR_FRAMES = 37, GEAR_LOOP_FROM = 17, GEAR_FRAME_MS = 1000 / 60;
+    var GEAR_FW = 32;   // 每帧宽度（雪碧图 1850×50 → 缩到 1184×32）
+    var gearRaf = 0, gearFrame = 0, gearLast = 0;
+    var gearReduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+    function gearStep(now) {
+        if (!el.gear || el.gear.classList.contains('is-off')) { gearRaf = 0; return; }
+        if (!gearLast) gearLast = now;
+        if (now - gearLast >= GEAR_FRAME_MS) {
+            gearLast = now;
+            el.gear.style.backgroundPosition = (-gearFrame * GEAR_FW).toFixed(0) + 'px 0';
+            gearFrame = gearFrame >= GEAR_FRAMES - 1 ? GEAR_LOOP_FROM : gearFrame + 1;
+        }
+        gearRaf = requestAnimationFrame(gearStep);
+    }
+
+    /* 打字完成后出现、一直转到翻页。显隐由剧情状态判定；这里管播放与句末定位。
+       幂等：已经处于目标状态就只重贴位置、不重启动画——打完一帧内 onTyped 与 typeText
+       会各调一次 setGear(true)，重复重置会让进入帧从头闪一下。 */
+    function setGear(on) {
+        if (!el.gear) return;
+        on = !!on;
+        var wasOn = !el.gear.classList.contains('is-off');
+        el.gear.classList.toggle('is-off', !on);
+        if (!on) {
+            if (gearRaf) { cancelAnimationFrame(gearRaf); gearRaf = 0; }
+            return;
+        }
+        alignGear();
+        if (wasOn) return;   // 已开着：只更新位置，不动播放进度
+        gearFrame = 0; gearLast = 0;   // 刚出现：从变形进入帧重播
+        if (gearReduce) {
+            el.gear.style.backgroundPosition = (-GEAR_LOOP_FROM * GEAR_FW) + 'px 0';  // 静态：定在完整帧
+            return;
+        }
+        gearRaf = requestAnimationFrame(gearStep);
     }
 
     function init() {
@@ -387,10 +510,13 @@
         el.deco = el.hud.querySelector('[data-hud="deco"]');
         el.name = el.hud.querySelector('[data-hud="name"]');
         el.nameWhite = el.hud.querySelector('[data-hud="name-white"]');
-        el.nameImg = el.name.querySelector('img');
-        el.nameWhiteImg = el.nameWhite.querySelector('img');
+        el.nameMorph = el.hud.querySelector('[data-hud="name-morph"]');
         el.nameText = $('st-name');
         el.caret = $('st-caret');
+        el.gear = $('st-gear');
+        el.text = $('st-text');          // 句末齿轮定位用：量文字末尾 rect
+        el.textRun = $('st-text-txt');
+        if (el.gear) el.gear.classList.add('is-off');   // 默认隐藏，打字完成才出现
 
         /* 先摆一次名牌（哪怕此刻还没有名字）：底板/白闪层/文字盒的 left·width
            只在 layoutPlate 里写，开头不摆的话它们停在默认位置（left:auto → x=0），
@@ -425,6 +551,8 @@
             run(59, 0, (60 / FPS) * 1000 / (opt.speed * opt.openSpeed), paintWindow, done);
         },
         setName: setName,
+        /* 开场前预置首句名牌（只摆文字/档位，不擦入）：避免名牌动画播两次 */
+        primeName: function (text) { setName(text, true); },
         /* AUTO 开关：只有开着的时候装饰线才跑「充能」，关掉退回静态暗态 */
         setAuto: setAuto,
         /* 直接跳到开场动画的第 t 帧（0–59），调试/预览用 */
@@ -432,6 +560,7 @@
         showName: function () { run(st.plate, 1, (20 / FPS) * 1000, paintPlate); },
         hideName: function () { run(st.plate, 0, (20 / FPS) * 1000, paintPlate); },
         setCaret: setCaret,
+        setGear: setGear,
         setSpeed: function (v) { opt.speed = v > 0 ? v : 1; },
         options: opt,
         fit: fit,
