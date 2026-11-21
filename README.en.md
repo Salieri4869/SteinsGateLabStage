@@ -332,7 +332,7 @@ All three are in Chinese; the code and the tables above should be enough to foll
 
 ## License
 
-**Code**: [AGPL-3.0](LICENSE). This project started from [NekoWebShow](https://github.com/Chocola-X/NekoWebShow) (also AGPL-3.0), so the work as a whole remains under AGPL-3.0.
+**Code**: This project is licensed under [AGPL-3.0](LICENSE). Modifications and derivative works are welcome; please keep the authorship information and release your modified code under the same license.
 
 > AGPL section 13: if you deploy a modified version of this project as a publicly reachable network service, you must offer the corresponding source to its users.
 

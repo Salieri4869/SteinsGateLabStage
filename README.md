@@ -328,7 +328,7 @@ wasm 导出了 84 个 `EmotePlayer_*` / `EmoteDevice_*` 函数，`emoteplayer.js
 
 ## 许可
 
-**代码**：[AGPL-3.0](LICENSE)。本项目以 [NekoWebShow](https://github.com/Chocola-X/NekoWebShow)（同为 AGPL-3.0）为创作起点，故整体沿用 AGPL-3.0 授权。
+**代码**：本项目采用 [AGPL-3.0](LICENSE) 授权。允许二次开发；请保留作者相关信息，并以相同许可证开源修改后的代码。
 
 > AGPL 第 13 条：若你将本项目的修改版部署为可公开访问的网络服务，需向使用者提供对应源码。
 
