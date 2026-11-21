@@ -59,11 +59,13 @@ const THUMB_REL = 'static/background/.thumbs';
 const THUMB_MAX = 2 * 1024 * 1024;   // 实测 720p JPEG 约 120~220KB，2MB 兜底
 const IMG_EXT = /\.(jpe?g|png|webp|bmp|gif|avif)$/i;
 
-/* 剧情数据：只写 steins_gate/story/cast.json 与 steins_gate/story/scenes/<slug>.json，文件名一律 ASCII slug */
+/* 剧情数据：只写 steins_gate/story/cast.json 与 steins_gate/story/scenes/<name>.json。
+   文件名允许中文等 Unicode 字母/数字，以及空格、连字符、下划线；路径穿越、控制字符、
+   系统保留字符仍由 storyTarget 的 BAD_CHARS / '..' / 前导点检查挡住。 */
 const STORY_DIR = join(ROOT, 'steins_gate', 'story');
 const SCENE_DIR = join(STORY_DIR, 'scenes');
 const CAST_FILE = join(STORY_DIR, 'cast.json');
-const SCENE_NAME = /^[a-z0-9][a-z0-9-]*\.json$/;
+const SCENE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} _-]*\.json$/u;
 
 /* 即时语音：导入 / TTS 合成的音频都落 steins_gate/story/voices/；TTS 走可选外部引擎（默认关闭）
    /api/voice             GET 列出 / GET?name= 流式播放（Range，供 <audio> 拖动）
@@ -294,7 +296,7 @@ function storyTarget(name) {
         throw new Error('非法文件名');
     }
     if (name === 'cast.json') return { abs: CAST_FILE, rel: 'steins_gate/story/cast.json', kind: 'cast' };
-    if (!SCENE_NAME.test(name)) throw new Error('场景名须为小写字母/数字/连字符 + .json');
+    if (!SCENE_NAME.test(name)) throw new Error('场景名须为中英文字/数字/空格/连字符/下划线 + .json');
     return { abs: join(SCENE_DIR, name), rel: 'steins_gate/story/scenes/' + name, kind: 'scene' };
 }
 

@@ -117,6 +117,8 @@ dist
 
 
 #project
+AGENTS.md
+static/bgm/
 *.zip
 *.psb
 *.opus

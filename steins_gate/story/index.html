@@ -15,6 +15,8 @@
             font-display: swap;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* 原生控件（select 展开菜单、滚动条等）按深色渲染，和自定义深色下拉风格一致 */
+        html { color-scheme: dark; }
         html, body { width: 100%; height: 100%; overflow: hidden; }
         body {
             background: #07141a center center / cover no-repeat;
@@ -44,10 +46,41 @@
         }
         .st-home:hover { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
         .st-brand { font: 500 10px/1.6 ui-monospace, Consolas, monospace; letter-spacing: .28em; color: #63d6c4; }
-        #st-scene {
-            background: rgba(255,255,255,.06); color: #e6f1ef;
+        .st-scene-picker { position: relative; }
+        .st-scene-trigger {
+            display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            min-width: 200px; max-width: 320px; padding: 4px 8px; cursor: pointer;
+            background: rgba(255,255,255,.06); color: #e6f1ef; font-family: inherit; font-size: 12px;
             border: 1px solid rgba(99,214,196,.3); border-radius: 4px;
-            padding: 4px 8px; font-size: 12px; min-width: 200px;
+        }
+        .st-scene-trigger:hover { border-color: rgba(99,214,196,.6); }
+        .st-scene-trigger:focus-visible { outline: 1px solid #63d6c4; outline-offset: 1px; }
+        .st-scene-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .st-scene-caret {
+            flex: none; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
+            border-top: 5px solid rgba(230,241,239,.6); transition: transform .15s ease;
+        }
+        .st-scene-picker.is-open .st-scene-caret { transform: rotate(180deg); }
+        .st-scene-menu {
+            position: absolute; top: calc(100% + 4px); left: 0; z-index: 30;
+            min-width: max(100%, 280px); max-width: 420px; max-height: 320px; overflow-y: auto;
+            padding: 4px; background: #0c1c22; border: 1px solid rgba(99,214,196,.4); border-radius: 5px;
+            box-shadow: 0 8px 24px rgba(0,0,0,.5);
+        }
+        .st-scene-menu[hidden] { display: none; }
+        .st-scene-menu::-webkit-scrollbar { width: 6px; }
+        .st-scene-menu::-webkit-scrollbar-thumb { background: rgba(99,214,196,.3); border-radius: 3px; }
+        .st-scene-opt {
+            display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 3px;
+            cursor: pointer; font-size: 12px; color: #dceae7; white-space: nowrap;
+        }
+        .st-scene-opt:hover, .st-scene-opt.is-active { background: rgba(99,214,196,.16); }
+        .st-scene-opt[aria-selected="true"] { color: #63d6c4; }
+        .st-scene-opt .st-scene-check { flex: none; width: 12px; color: #63d6c4; }
+        .st-scene-opt .st-scene-title { overflow: hidden; text-overflow: ellipsis; }
+        .st-scene-opt .st-scene-file {
+            flex: none; margin-left: auto; padding-left: 10px;
+            font: 500 10px/1 ui-monospace, Consolas, monospace; color: rgba(230,241,239,.38);
         }
         #st-msg { font-size: 12px; color: #e9b96e; }
         #st-msg:empty { display: none; }
@@ -362,10 +395,52 @@
         .st-col h2 { font-size: 13px; font-weight: 500; color: #63d6c4; }
         .st-head-ops { display: flex; align-items: center; gap: 6px; }
 
+        /* 行列表与 BGM 竖轨共用同一个滚动容器：滚动时段落始终贴着自己的台词行 */
+        .st-lines-wrap { display: flex; flex: 1; min-height: 0; gap: 6px; overflow-y: auto; }
+        .st-lines-wrap::-webkit-scrollbar { width: 7px; }
+        .st-lines-wrap::-webkit-scrollbar-thumb { background: rgba(99,214,196,.25); border-radius: 4px; }
         #st-lines {
-            flex: 1; min-height: 0; overflow-y: auto; list-style: none;
-            margin: 0 -6px; padding: 0 6px;
+            flex: 1; min-width: 0; overflow: visible; list-style: none;
+            margin: 0; padding: 0 6px 0 0;
         }
+        /* BGM 竖轨：固定宽度，高度由 JS 按行列表内容高度设定；每段按真实行边界定位 */
+        .st-bgm-track {
+            flex: none; width: 30px; position: relative; align-self: flex-start;
+            border-radius: 4px;
+            background: linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px) 0 0 / 100% var(--bgm-row-h, 38px);
+        }
+        .st-bgm-seg {
+            position: absolute; left: 3px; right: 3px;
+            background: rgba(226,164,95,.18); border: 1px solid rgba(226,164,95,.5);
+            border-radius: 4px; cursor: grab; touch-action: none;
+            transition: background .12s, border-color .12s;
+        }
+        .st-bgm-seg:hover { background: rgba(226,164,95,.28); }
+        .st-bgm-seg.is-at { background: rgba(226,164,95,.34); border-color: #e2a45f; }
+        .st-bgm-seg.is-sel { background: rgba(226,164,95,.42); border-color: #ffd08a; box-shadow: 0 0 0 1px rgba(255,208,138,.5); }
+        .st-bgm-seg.is-drag { cursor: grabbing; opacity: .85; }
+        /* 竖轨窄，曲名竖排才能读；底部留给区间号 */
+        .st-bgm-seg-name {
+            position: absolute; top: 4px; bottom: 13px; left: 0; right: 0;
+            writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: .5px;
+            font: 500 9px/1.15 ui-monospace, Consolas, monospace; color: #ffd9a8;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            text-align: center; pointer-events: none;
+        }
+        .st-bgm-seg-range {
+            position: absolute; bottom: 2px; left: 0; right: 0;
+            font: 500 8px/1 ui-monospace, Consolas, monospace; color: rgba(255,217,168,.65);
+            text-align: center; pointer-events: none;
+        }
+        /* 上下边缘：拖它改区间端点；整条其余区域拖它平移 */
+        .st-bgm-grip {
+            position: absolute; left: 50%; transform: translateX(-50%);
+            width: 24px; height: 7px; border-radius: 4px; cursor: ns-resize;
+            background: #e2a45f; opacity: .8;
+        }
+        .st-bgm-grip:hover { opacity: 1; }
+        .st-bgm-grip--top { top: -4px; }
+        .st-bgm-grip--bottom { bottom: -4px; }
         .st-line {
             display: flex; align-items: center; gap: 8px;
             padding: 7px 8px; margin-bottom: 2px; border-radius: 5px;
@@ -391,6 +466,23 @@
             flex: 1; min-width: 0; font-size: 12.5px; color: #cddad7;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
+        /* 行内背景槽：拖图库里的背景到这里＝本行背景覆盖，缩略图常驻显示 */
+        .st-line-bg {
+            flex: none; position: relative; width: 54px; height: 22px; border-radius: 3px;
+            background: rgba(0,0,0,.22) center center / cover no-repeat;
+            border: 1px dashed rgba(99,214,196,.22); transition: border-color .12s, box-shadow .12s;
+        }
+        .st-line-bg.has-bg { border-style: solid; border-color: rgba(99,214,196,.45); }
+        .st-line-bg.is-over { border-style: solid; border-color: #63d6c4; box-shadow: 0 0 0 2px rgba(99,214,196,.3); }
+        .st-line-bg-clear {
+            display: none; position: absolute; right: -5px; top: -6px;
+            width: 14px; height: 14px; padding: 0; cursor: pointer; line-height: 12px;
+            font-size: 10px; color: #dceae7; background: #163038;
+            border: 1px solid rgba(226,164,95,.5); border-radius: 50%;
+        }
+        .st-line:hover .st-line-bg.has-bg .st-line-bg-clear,
+        .st-line.is-sel .st-line-bg.has-bg .st-line-bg-clear { display: block; }
+        .st-line-bg-clear:hover { color: #07141a; background: #e2a45f; }
         .st-line-ops { flex: none; display: flex; gap: 3px; opacity: 0; transition: opacity .12s; }
         .st-line:hover .st-line-ops, .st-line.is-sel .st-line-ops { opacity: 1; }
         .st-line-ops button {
@@ -408,18 +500,121 @@
         }
         .st-field { display: block; margin-bottom: 9px; font-size: 11px; color: rgba(230,241,239,.6); }
         .st-field > span { display: block; margin-bottom: 4px; }
-        .st-field input, .st-field select, .st-field textarea {
+        .st-field input, .st-field select, .st-field textarea, .st-bg-search-row input {
             width: 100%; background: rgba(0,0,0,.35); color: #dceae7;
             border: 1px solid rgba(99,214,196,.2); border-radius: 4px;
             padding: 6px 8px; font-size: 12px; font-family: inherit;
         }
         .st-field textarea { resize: vertical; min-height: 70px; line-height: 1.6; }
-        .st-field input:focus, .st-field select:focus, .st-field textarea:focus {
+        .st-field input:focus, .st-field select:focus, .st-field textarea:focus, .st-bg-search-row input:focus {
             outline: none; border-color: rgba(99,214,196,.6);
         }
         .st-field select:disabled, .st-field input:disabled { opacity: .45; }
-        .st-field input::placeholder { color: rgba(230,241,239,.28); }
+        .st-field input::placeholder, .st-bg-search-row input::placeholder { color: rgba(230,241,239,.28); }
+        /* 原生下拉展开项也用深色，和顶栏自定义场景菜单一致（不再弹白菜单） */
+        select option { background: #0c1c22; color: #dceae7; }
         .st-field-note { font-style: normal; font-size: 10px; color: rgba(230,241,239,.32); margin-left: 4px; }
+        /* 背景：预览缩略图 + 搜索框 + 图库（拖拽源）。搜索框过滤图库，点图库项＝场景背景，拖到行内＝行覆盖 */
+        .st-bg-field > span { margin-bottom: 5px; }
+        .st-bg-preview {
+            width: 100%; height: 74px; margin-bottom: 5px; border-radius: 4px;
+            background: rgba(0,0,0,.35) center center / cover no-repeat;
+            border: 1px solid rgba(99,214,196,.25);
+        }
+        .st-bg-search-row { display: flex; gap: 5px; }
+        .st-bg-search-row input { flex: 1; min-width: 0; }
+        .st-bg-search-row button {
+            flex: none; width: 30px; cursor: pointer; font-size: 12px; line-height: 1;
+            color: #9fb8b4; background: transparent;
+            border: 1px solid rgba(99,214,196,.25); border-radius: 4px;
+        }
+        .st-bg-search-row button:hover { color: #07141a; background: #e2a45f; border-color: #e2a45f; }
+        .st-bg-search-row button:disabled { opacity: .3; cursor: default; }
+        .st-bg-empty { padding: 12px 6px; font-size: 11px; color: rgba(230,241,239,.4); text-align: center; }
+        .st-bg-empty[hidden] { display: none; }
+        .st-bg-field.is-over { outline: 2px solid #63d6c4; outline-offset: 3px; border-radius: 5px; }
+        .st-bg-gallery {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+            max-height: 164px; overflow-y: auto; margin-top: 7px; padding: 3px;
+            background: rgba(0,0,0,.2); border: 1px solid rgba(99,214,196,.15); border-radius: 4px;
+        }
+        .st-bg-gallery[hidden] { display: none; }
+        .st-bg-gallery::-webkit-scrollbar { width: 5px; }
+        .st-bg-gallery::-webkit-scrollbar-thumb { background: rgba(99,214,196,.3); border-radius: 3px; }
+        .st-bg-item {
+            position: relative; aspect-ratio: 16 / 9; border-radius: 3px; cursor: pointer;
+            background: #0c1c22 center center / cover no-repeat;
+            border: 1px solid rgba(99,214,196,.2); overflow: hidden;
+        }
+        .st-bg-item:hover { border-color: rgba(99,214,196,.75); }
+        .st-bg-item:active { cursor: grabbing; }
+        .st-bg-item.is-current { border-color: #e9b96e; box-shadow: 0 0 0 1px #e9b96e; }
+        .st-bg-item.is-missing { background: repeating-linear-gradient(45deg, #16262b, #16262b 6px, #1b2f35 6px, #1b2f35 12px); }
+        .st-bg-item span {
+            position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 3px;
+            font: 500 8px/1.2 ui-monospace, Consolas, monospace; color: #dceae7;
+            background: rgba(4,12,17,.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        /* BGM 曲目清单：拖到剧本行右侧竖轨即落一段 */
+        .st-bgm-field { margin-top: 12px; }
+        .st-bgm-field > span { display: block; margin-bottom: 5px; font-size: 11px; color: rgba(230,241,239,.6); }
+        .st-bgm-picker {
+            display: flex; flex-direction: column; gap: 3px; max-height: 132px; overflow-y: auto;
+            padding: 4px; background: rgba(0,0,0,.2);
+            border: 1px solid rgba(226,164,95,.25); border-radius: 4px;
+        }
+        .st-bgm-picker::-webkit-scrollbar { width: 5px; }
+        .st-bgm-picker::-webkit-scrollbar-thumb { background: rgba(226,164,95,.35); border-radius: 3px; }
+        .st-bgm-file {
+            display: flex; align-items: center; gap: 6px; padding: 4px 6px; cursor: grab;
+            font-size: 11px; color: #e8d6bd; background: rgba(226,164,95,.07);
+            border: 1px solid rgba(226,164,95,.2); border-radius: 3px;
+        }
+        .st-bgm-file:hover { background: rgba(226,164,95,.16); border-color: rgba(226,164,95,.5); }
+        .st-bgm-file:active { cursor: grabbing; }
+        .st-bgm-file-ico { flex: none; color: #e2a45f; font-size: 13px; }
+        .st-bgm-file-name {
+            min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            font: 500 10px/1.2 ui-monospace, Consolas, monospace;
+        }
+        .st-bgm-empty { padding: 10px 6px; font-size: 10px; color: rgba(230,241,239,.4); text-align: center; }
+        /* 点竖轨上的段才出现：试听 / 删除 / 覆盖句（如 1–3） */
+        .st-bgm-detail {
+            margin-top: 8px; padding: 8px; border-radius: 4px;
+            background: rgba(226,164,95,.07); border: 1px solid rgba(226,164,95,.35);
+        }
+        .st-bgm-detail[hidden] { display: none; }
+        .st-bgm-detail-head {
+            display: flex; align-items: center; justify-content: space-between; gap: 6px;
+            font-size: 11px; color: #ffd9a8; margin-bottom: 5px;
+        }
+        .st-bgm-detail-file {
+            font: 500 10px/1.3 ui-monospace, Consolas, monospace; color: rgba(232,214,189,.8);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 7px;
+        }
+        .st-bgm-detail-range { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(230,241,239,.6); }
+        .st-bgm-detail-range input {
+            width: 56px; padding: 4px 6px; text-align: center;
+            background: rgba(0,0,0,.35); color: #dceae7; font-family: inherit; font-size: 11px;
+            border: 1px solid rgba(226,164,95,.3); border-radius: 3px;
+        }
+        .st-bgm-detail-range input:focus { outline: none; border-color: #e2a45f; }
+        .st-bgm-fades { display: flex; gap: 6px; margin-top: 7px; }
+        .st-bgm-fades button {
+            flex: 1; padding: 4px 4px; cursor: pointer; font-size: 11px; font-family: inherit;
+            color: #9fb8b4; background: transparent;
+            border: 1px solid rgba(226,164,95,.4); border-radius: 3px;
+        }
+        .st-bgm-fades button:hover { border-color: #e2a45f; color: #ffd9a8; }
+        .st-bgm-fades button.is-on { color: #07141a; background: #e2a45f; border-color: #e2a45f; }
+        .st-bgm-detail-ops { display: flex; gap: 6px; margin-top: 8px; }
+        .st-bgm-detail-ops button {
+            flex: 1; padding: 5px 4px; cursor: pointer; font-size: 11px; font-family: inherit;
+            color: #e8d6bd; background: transparent; border: 1px solid rgba(226,164,95,.4); border-radius: 3px;
+        }
+        .st-bgm-detail-ops button:hover { color: #07141a; background: #e2a45f; border-color: #e2a45f; }
+        .st-bgm-detail-ops button.is-playing { color: #07141a; background: #e2a45f; border-color: #e2a45f; }
+        #st-bgm-del:hover { color: #fff; background: #b45a4a; border-color: #b45a4a; }
         .st-inline { display: flex; gap: 6px; }
         .st-inline input { flex: 1; min-width: 0; }
         .st-inline button {
@@ -790,7 +985,15 @@
     <header id="st-bar">
         <a class="st-home" href="../../index.html" title="返回主页">← 主页</a>
         <span class="st-brand">STORY MODE</span>
-        <select id="st-scene" aria-label="场景"></select>
+        <div class="st-scene-picker" id="st-scene-picker">
+            <button type="button" class="st-scene-trigger" id="st-scene-trigger"
+                    aria-haspopup="listbox" aria-expanded="false" aria-label="选择场景">
+                <span class="st-scene-label" id="st-scene-label"></span>
+                <span class="st-scene-caret" aria-hidden="true"></span>
+            </button>
+            <div class="st-scene-menu" id="st-scene-menu" role="listbox" hidden></div>
+            <select id="st-scene" aria-label="场景" hidden></select>
+        </div>
         <span id="st-msg"></span>
         <span class="st-spacer"></span>
         <span id="st-progress"></span>
@@ -888,9 +1091,12 @@
                 </div>
             </div>
 
-            <!-- 页 1：剧本行 -->
+            <!-- 页 1：剧本行（右侧固定一条 BGM 竖轨，与行对齐） -->
             <div class="st-view" id="st-view-script">
-                <ol id="st-lines"></ol>
+                <div class="st-lines-wrap">
+                    <ol id="st-lines"></ol>
+                    <div class="st-bgm-track" id="st-bgm-track" title="从属性面板的 BGM 清单拖音频到这里；拖整段平移，拖上下边缘改覆盖句；点段在右侧配置"></div>
+                </div>
             </div>
 
             <!-- 页 2：角色表。三栏 = 角色 / 该角色的动作宏 / 选中项的属性 -->
@@ -937,7 +1143,46 @@
                 <div class="st-sec">
                     <h3>场景</h3>
                     <label class="st-field"><span>标题</span><input type="text" id="st-title"></label>
-                    <label class="st-field"><span>背景</span><select id="st-bg"></select></label>
+                    <div class="st-field st-bg-field" id="st-bg-drop">
+                        <span>背景 <em class="st-field-note">搜索后点图库项选中，或拖到剧本行</em></span>
+                        <div class="st-bg-preview" id="st-bg-preview" title="当前场景背景预览"></div>
+                        <div class="st-bg-search-row">
+                            <input type="text" id="st-bg-search" autocomplete="off" placeholder="搜索背景文件名…">
+                            <button type="button" id="st-bg-clear" title="清除场景背景（跟随上一场景）">✕</button>
+                        </div>
+                        <div class="st-bg-gallery" id="st-bg-gallery" title="背景图库：点选设为场景背景，拖到剧本行设为该行背景"></div>
+                        <div class="st-bg-empty" id="st-bg-empty" hidden>没有匹配的背景</div>
+                    </div>
+                    <div class="st-bgm-field">
+                        <span>背景音乐 <em class="st-field-note">拖音频到右侧竖轨；点段落配置</em></span>
+                        <div class="st-bg-search-row">
+                            <input type="text" id="st-bgm-search" autocomplete="off" placeholder="搜索背景音乐…">
+                            <button type="button" id="st-bgm-clear" title="清除搜索词">✕</button>
+                        </div>
+                        <div class="st-bgm-picker" id="st-bgm-picker" title="BGM 清单：拖到剧本行右侧竖轨"></div>
+                        <div class="st-bgm-empty" id="st-bgm-empty" hidden>没有匹配的音乐</div>
+                        <div class="st-bgm-detail" id="st-bgm-detail" hidden>
+                            <div class="st-bgm-detail-head">
+                                <span id="st-bgm-detail-title">BGM 段</span>
+                                <span class="st-field-note" id="st-bgm-detail-note">循环播放</span>
+                            </div>
+                            <div class="st-bgm-detail-file" id="st-bgm-detail-file"></div>
+                            <label class="st-bgm-detail-range">覆盖第
+                                <input type="number" id="st-bgm-from" min="1" step="1" title="起始句（1 起）">
+                                —
+                                <input type="number" id="st-bgm-to" min="1" step="1" title="结束句（含）">
+                                句
+                            </label>
+                            <div class="st-bgm-fades">
+                                <button type="button" id="st-bgm-fadein" title="开始时音量渐入（约 1 秒）；试听与剧情播放都生效">淡入</button>
+                                <button type="button" id="st-bgm-fadeout" title="停止或切段时音量渐出（约 1 秒）；试听与剧情播放都生效">淡出</button>
+                            </div>
+                            <div class="st-bgm-detail-ops">
+                                <button type="button" id="st-bgm-play" title="点一下试听，再点停止">▶ 播放</button>
+                                <button type="button" id="st-bgm-del" title="删除这段 BGM">✕ 删除</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="st-sec">

@@ -20,6 +20,8 @@
 //            scale 为相对缩放，z 为叠放次序。写过 enter 的角色算中途登场、开场隐藏；
 //            其余角色开场在台；之后谁上/下场由每行的 enter/exit 决定。
 //            省略时按台词里出现的角色自动均分站位（兼容旧场景）。
+//    bgm    [{ file, range: [起, 止] }]，句号 1-based 闭区间，可多段；区间内循环、
+//           同区间跨行不重播。旧 { file, from, to } 读入即迁移为 range。
 //
 //  行字段：
 //    role    cast.json 的键（说话者：身份，不是显示名）——剧本、语音、模型都靠它
@@ -55,6 +57,13 @@
         introPending: false,   // 开场动画还没放完、首句尚未落字：此时 AUTO 不许抢跑
         typeDone: null, seq: 0, lineStart: 0,
         bg: null, models: null, voices: {},
+        bgmFiles: [],          // static/bgm/ 下的音频文件名（BGM 曲目清单）
+        bgmAudio: null,        // 单个 <audio loop>，跨行不重建＝不打断、不重播
+        bgmKey: '',            // 当前正在播的区间标识 from|to|file；同区间跨行保持不变
+        bgmSel: -1,            // 右侧配置面板正在编辑的 BGM 段（-1＝未选，面板隐藏）
+        bgmResizing: false,    // 拖动 BGM 段期间暂停按行切曲
+        bgmFadeRaf: 0,         // 淡入/淡出音量渐变的 rAF id
+        bgmFadeSeq: 0,         // 淡入/淡出令牌：切曲或重播时 +1，旧动画据此作废
         soundFolders: [], soundFiles: {},
         liveOpen: false, liveSrc: 'file', liveBusy: false, liveRole: '', blobUrl: '',
         // 多角色：actors[role] = { player, config, ... }；casting 由 scene.stage 决定
@@ -714,8 +723,466 @@
         var items = await listDir('../../static/background/');
         state.bg = items.filter(function (x) { return !x.isDir && IMG_RE.test(x.name); })
             .map(function (x) { return x.name; });
+        // 缩略图清单：node 服务走 /api/thumbs，纯静态服务回退读 .thumbs 目录索引
+        state.thumbs = {};
+        try {
+            var r = await fetch('../../api/thumbs', { cache: 'no-store' });
+            if (r.ok && r.headers.get('x-emote-server') === 'node') {
+                var j = await r.json();
+                (j.files || []).forEach(function (s) { state.thumbs[s] = true; });
+            }
+        } catch (_) { /* 没有缩略图接口时图库回退显示原图 */ }
+        renderBgGallery();
         if (state.scene && state.mode === 'edit') renderProps();
     }
+
+    /* ---- 背景图库：拖拽源，只有这里的图片能拖 ---- */
+    var BG_MIME = 'application/x-emote-bg';   // 自定义类型：外部文件拖入时 types 里没有它
+    function bgStem(name) { return String(name || '').replace(/\.[^.]+$/, ''); }
+    function bgSrc(name) {
+        var stem = bgStem(name);
+        return state.thumbs && state.thumbs[stem]
+            ? '../../static/background/.thumbs/' + encodeURIComponent(stem) + '.jpg'
+            : '../../static/background/' + encodeURIComponent(name);
+    }
+    function bgLabel(name) {
+        var stem = bgStem(name);
+        return (state.thumbs && state.thumbs[stem]) ? stem : name;
+    }
+    /* 由鼠标 clientY 反推落在第几行（0-based）；用行的实际位置，行高不固定也准 */
+    function rowAtY(y) {
+        var rows = $('st-lines') ? $('st-lines').children : [];
+        for (var i = 0; i < rows.length; i++) {
+            var box = rows[i].getBoundingClientRect();
+            if (y >= box.top && y < box.bottom) return i;
+        }
+        return -1;
+    }
+    /* 在第 row 行（0-based）落一段 BGM：默认只覆盖这一句。
+       与旧段重叠时把那一句让给新段（截短旧段），避免一句两曲；不自动试听。 */
+    function addBgmAt(file, row) {
+        if (!state.scene) return;
+        var n = row + 1;
+        var list = bgmList();
+        list.forEach(function (b) {
+            var r = bgmRange(b);
+            if (n < r[0] || n > r[1]) return;
+            if (n === r[0]) {
+                if (r[1] > r[0]) setBgmRange(b, r[0] + 1, r[1]);
+                else b._drop = true;
+            } else {
+                setBgmRange(b, r[0], n - 1);
+            }
+        });
+        state.scene.bgm = list.filter(function (b) { return !b._drop; });
+        state.scene.bgm.forEach(function (b) { delete b._drop; });
+        var added = { file: file, range: [n, n] };
+        state.scene.bgm.push(added);
+        state.bgmSel = state.scene.bgm.indexOf(added);
+        markStale();
+        renderBgmTrack();
+        renderBgmDetail();
+        msg('第 ' + n + ' 句起 ' + file + '（拖整段平移，拖上下边缘改长度）');
+    }
+    function delBgm(j) {
+        var bl = bgmList();
+        var b = bl[j];
+        if (!b) return;
+        var key = bgmKeyOf(b);
+        bl.splice(j, 1);
+        if (state.bgmSel === j) state.bgmSel = -1;
+        else if (state.bgmSel > j) state.bgmSel--;
+        markStale();
+        if (state.bgmKey === key) stopBgm();
+        renderBgmTrack();
+        renderBgmDetail();
+        msg('已删除 BGM ' + b.file);
+    }
+    function selectBgm(j) {
+        state.bgmSel = j;
+        renderBgmTrack();
+        renderBgmDetail();
+    }
+    function clearBgmSel() {
+        if (state.bgmSel < 0) return;
+        state.bgmSel = -1;
+        renderBgmTrack();
+        renderBgmDetail();
+    }
+    /* 点段才显示的右侧配置：起止句 + 播放/删除 */
+    function renderBgmDetail() {
+        var box = $('st-bgm-detail');
+        if (!box) return;
+        var b = bgmList()[state.bgmSel];
+        box.hidden = !b;
+        if (!b) return;
+        var r = bgmRange(b);
+        $('st-bgm-detail-title').textContent = 'BGM 段 ' + (state.bgmSel + 1);
+        var file = $('st-bgm-detail-file');
+        file.textContent = b.file;
+        file.title = b.file;
+        $('st-bgm-from').value = String(r[0]);
+        $('st-bgm-to').value = String(r[1]);
+        $('st-bgm-fadein').classList.toggle('is-on', !!b.fadeIn);
+        $('st-bgm-fadeout').classList.toggle('is-on', !!b.fadeOut);
+        renderBgmPlayBtn();
+    }
+
+    /* 曲目清单：static/bgm/ 下的音频，拖到剧本行右侧 BGM 轨即落一段。
+       每项携带 BGM_MIME，外部文件拖进来没有该类型 → 被 isBgmDrag 拒绝。 */
+    function renderBgmPicker() {
+        var box = $('st-bgm-picker');
+        if (!box) return;
+        box.innerHTML = '';
+        (state.bgmFiles || []).forEach(function (name) {
+            var item = document.createElement('div');
+            item.className = 'st-bgm-file';
+            item.draggable = true;
+            item.dataset.file = name;
+            item.title = name + '\n拖到剧本行的 BGM 轨，从那一行开始循环播放';
+            var icon = document.createElement('span');
+            icon.className = 'st-bgm-file-ico';
+            icon.textContent = '♪';
+            var cap = document.createElement('span');
+            cap.className = 'st-bgm-file-name';
+            cap.textContent = name;
+            item.appendChild(icon);
+            item.appendChild(cap);
+            box.appendChild(item);
+        });
+        filterBgmPicker();
+    }
+    /* 曲目搜索：按文件名过滤清单，不区分大小写；空词全显 */
+    function filterBgmPicker() {
+        var input = $('st-bgm-search'), box = $('st-bgm-picker'), empty = $('st-bgm-empty');
+        if (!input || !box) return;
+        var q = String(input.value || '').trim().toLowerCase();
+        var shown = 0;
+        [].forEach.call(box.children, function (x) {
+            var ok = !q || (x.dataset.file || '').toLowerCase().indexOf(q) >= 0;
+            x.hidden = !ok;
+            if (ok) shown++;
+        });
+        if (empty) {
+            var total = (state.bgmFiles || []).length;
+            empty.hidden = shown > 0 || !total;
+            empty.textContent = total ? '没有匹配的音乐' : 'static/bgm/ 下没有音频';
+        }
+    }
+
+    /* BGM 竖轨：与行列表同滚、按真实行边界定位一段。
+       段主体＝拖动平移；上下两个把手＝改区间端点；删除/配置一律去右侧面板。 */
+    function renderBgmTrack() {
+        var host = $('st-bgm-track');
+        if (!host) return;
+        host.innerHTML = '';
+        var ol = $('st-lines');
+        var rows = ol ? ol.children : [];
+        var n = rows.length;
+        if (!n) { host.style.height = '0px'; return; }
+        var olH = ol.getBoundingClientRect().height;
+        host.style.height = olH + 'px';
+        // 行高不固定：用首行+行间距画格线，拖动换算用平均行高兜底
+        var rowH = rows[0].getBoundingClientRect().height + 2;
+        host.style.setProperty('--bgm-row-h', rowH + 'px');
+        var hostTop = host.getBoundingClientRect().top;
+        bgmList().forEach(function (b, j) {
+            var r = bgmRange(b);
+            var from = Math.max(1, Math.min(n, r[0]));
+            var to = Math.max(from, Math.min(n, r[1]));
+            var topRow = rows[from - 1].getBoundingClientRect();
+            var botRow = rows[to - 1].getBoundingClientRect();
+            var seg = document.createElement('div');
+            seg.className = 'st-bgm-seg'
+                + (state.sel + 1 >= from && state.sel + 1 <= to ? ' is-at' : '')
+                + (state.bgmSel === j ? ' is-sel' : '')
+                + (state.bgmResizing && state.bgmSel === j ? ' is-drag' : '');
+            seg.dataset.j = String(j);
+            seg.style.top = (topRow.top - hostTop) + 'px';
+            seg.style.height = (botRow.bottom - topRow.top) + 'px';
+            seg.title = b.file + '｜第 ' + from + '–' + to + ' 句（循环）\n'
+                + '拖整段平移 · 拖上下边缘改长度 · 点一下在右侧配置';
+            var gripTop = document.createElement('span');
+            gripTop.className = 'st-bgm-grip st-bgm-grip--top';
+            gripTop.dataset.bgmEdge = 'from';
+            var name = document.createElement('span');
+            name.className = 'st-bgm-seg-name';
+            name.textContent = b.file;
+            var range = document.createElement('span');
+            range.className = 'st-bgm-seg-range';
+            range.textContent = from + '–' + to;
+            var gripBot = document.createElement('span');
+            gripBot.className = 'st-bgm-grip st-bgm-grip--bottom';
+            gripBot.dataset.bgmEdge = 'to';
+            seg.appendChild(gripTop);
+            seg.appendChild(name);
+            seg.appendChild(range);
+            seg.appendChild(gripBot);
+            host.appendChild(seg);
+        });
+    }
+
+    function renderBgGallery() {
+        var box = $('st-bg-gallery');
+        if (!box) return;
+        box.innerHTML = '';
+        (state.bg || []).forEach(function (name) {
+            var item = document.createElement('div');
+            item.className = 'st-bg-item';
+            item.draggable = true;
+            item.dataset.file = name;
+            item.title = name + '\n点选＝场景背景；拖到剧本行＝该行背景；拖到这里＝场景背景';
+            item.style.backgroundImage = 'url("' + bgSrc(name) + '")';
+            var cap = document.createElement('span');
+            cap.textContent = bgLabel(name);
+            item.appendChild(cap);
+            box.appendChild(item);
+        });
+        filterBgGallery();
+        syncBgCurrent();
+    }
+    /* 搜索框：按文件名/标签过滤图库，不区分大小写；空词显示全部 */
+    function filterBgGallery() {
+        var input = $('st-bg-search');
+        var box = $('st-bg-gallery');
+        var empty = $('st-bg-empty');
+        if (!input || !box) return;
+        var q = String(input.value || '').trim().toLowerCase();
+        var shown = 0;
+        [].forEach.call(box.children, function (x) {
+            var hay = (x.dataset.file + ' ' + bgLabel(x.dataset.file)).toLowerCase();
+            var ok = !q || hay.indexOf(q) >= 0;
+            x.hidden = !ok;
+            if (ok) shown++;
+        });
+        if (empty) empty.hidden = shown > 0 || !(state.bg || []).length;
+    }
+    /* 点选图库项＝设置整个场景的背景 */
+    function setSceneBackground(name) {
+        if (!state.scene || !name) return;
+        state.scene.background = name;
+        markStale();
+        syncBgCurrent();
+        msg('场景背景已设为 ' + name);
+    }
+    function syncBgCurrent() {
+        var cur = (state.scene && state.scene.background) || '';
+        var box = $('st-bg-gallery');
+        if (box) [].forEach.call(box.children, function (x) {
+            x.classList.toggle('is-current', x.dataset.file === cur);
+        });
+        var pv = $('st-bg-preview');
+        if (pv) {
+            pv.style.backgroundImage = cur ? 'url("' + bgSrc(cur) + '")' : '';
+            pv.title = cur ? '场景背景：' + cur : '场景未设背景，跟随上一场景';
+        }
+        var clear = $('st-bg-clear');
+        if (clear) clear.disabled = !cur;
+    }
+    function isBgDrag(evt) {
+        var dt = evt && evt.dataTransfer;
+        return !!(dt && dt.types && Array.prototype.indexOf.call(dt.types, BG_MIME) >= 0);
+    }
+
+    /* ---- BGM：static/bgm/ 下的音频，按句区间循环播放 ----
+       场景 JSON：bgm: [{ file, range: [起, 止] }]，句号 1-based 闭区间，可多段。
+       旧格式 { file, from, to } 读出即迁移成 range；保存时只写 range。
+       单一 <audio loop>：同一区间跨行只认 key，key 不变则不暂停、不 seek、不重播。
+       编辑态不自动播：必须点右侧「播放」才试听；播放模式仍按行自动同步。 */
+    var BGM_MIME = 'application/x-emote-bgm';   // 只有曲目清单里的项携带它，外部文件拖入被拒
+    function bgmUrl(file) { return '../../static/bgm/' + encodeURIComponent(file); }
+    function bgmList() {
+        var a = state.scene && state.scene.bgm;
+        if (!Array.isArray(a)) return [];
+        a.forEach(function (b) {
+            if (!b || Array.isArray(b.range)) return;
+            if (b.from != null || b.to != null) {
+                var f = Math.max(1, Number(b.from) || 1);
+                var t = Math.max(f, Number(b.to) || f);
+                b.range = [f, t];
+                delete b.from;
+                delete b.to;
+            }
+        });
+        return a;
+    }
+    function bgmRange(b) {
+        var r = b && b.range;
+        var f = Math.max(1, Number(r && r[0]) || 1);
+        var t = Math.max(f, Number(r && r[1]) || f);
+        return [f, t];
+    }
+    function setBgmRange(b, from, to) { b.range = [from, to]; }
+    function bgmKeyOf(b) {
+        var r = bgmRange(b);
+        return r[0] + '|' + r[1] + '|' + b.file;
+    }
+    /* 找覆盖第 idx 行（0-based）的区间；返回 { b, j, key } */
+    function bgmAt(idx) {
+        var n = idx + 1;
+        var list = bgmList();
+        for (var i = 0; i < list.length; i++) {
+            var b = list[i];
+            if (!b) continue;
+            var r = bgmRange(b);
+            if (n >= r[0] && n <= r[1]) return { b: b, j: i, key: bgmKeyOf(b) };
+        }
+        return null;
+    }
+    /* 某段能移动到的行范围：由它在拖动开始时的左右邻居决定，拖动中不会跳变 */
+    function bgmFreeBounds(j, orig, n) {
+        var lo = 1, hi = n;
+        bgmList().forEach(function (o, k) {
+            if (k === j) return;
+            var r = bgmRange(o);
+            if (r[1] < orig[0]) lo = Math.max(lo, r[1] + 1);
+            if (r[0] > orig[1]) hi = Math.min(hi, r[0] - 1);
+        });
+        return { lo: lo, hi: hi };
+    }
+    var BGM_FADE_MS = 900;   // 淡入/淡出固定时长（约 1 秒）
+    /* 音量渐变：令牌 bgmFadeSeq 保证只有最后一次切曲的动画存活，快速连按不串音 */
+    function cancelBgmFade() {
+        state.bgmFadeSeq++;
+        if (state.bgmFadeRaf) { cancelAnimationFrame(state.bgmFadeRaf); state.bgmFadeRaf = 0; }
+    }
+    function rampBgmVolume(a, from, to, done) {
+        var seq = state.bgmFadeSeq;
+        var t0 = 0;
+        function step(ts) {
+            if (seq !== state.bgmFadeSeq) return;      // 被更新的一次切曲取消
+            if (!t0) t0 = ts;
+            var k = Math.min(1, (ts - t0) / BGM_FADE_MS);
+            a.volume = from + (to - from) * k;
+            if (k < 1) state.bgmFadeRaf = requestAnimationFrame(step);
+            else { state.bgmFadeRaf = 0; if (done) done(); }
+        }
+        state.bgmFadeRaf = requestAnimationFrame(step);
+    }
+    /* 从当前正在响的段读回它自己（按 src 反查），用它决定淡出与淡入 */
+    function currentPlayingBgm() {
+        var a = state.bgmAudio;
+        if (!a || a.paused || !a.getAttribute('src')) return null;
+        var list = bgmList();
+        for (var i = 0; i < list.length; i++) {
+            if (bgmUrl(list[i].file) === a.getAttribute('src')) return list[i];
+        }
+        return null;
+    }
+    function hardStopAudio() {
+        var a = state.bgmAudio;
+        if (!a) return;
+        try { a.pause(); } catch (_) { }
+        a.volume = 1;
+    }
+    /* 硬停：换场/切模式/删段用，不留淡出尾巴 */
+    function stopBgm() {
+        cancelBgmFade();
+        hardStopAudio();
+        state.bgmKey = '';
+        renderBgmPlayBtn();
+    }
+    /* 带淡出地停：正在响的段配了 fadeOut 才渐弱，否则立即停 */
+    function fadeOutStopAudio(a, done) {
+        if (!a || a.paused || a.volume <= 0.01) { done(); return; }
+        rampBgmVolume(a, a.volume, 0, function () {
+            try { a.pause(); } catch (_) { }
+            a.volume = 1;
+            done();
+        });
+    }
+    function bgmAudio() {
+        var a = state.bgmAudio;
+        if (!a) {
+            a = new Audio();
+            a.loop = true;
+            a.preload = 'auto';
+            state.bgmAudio = a;
+        }
+        return a;
+    }
+    function startBgm(b, allowFade) {
+        cancelBgmFade();
+        var a = bgmAudio();
+        var url = bgmUrl(b.file);
+        if (a.getAttribute('src') !== url) a.src = url;
+        try { a.currentTime = 0; } catch (_) { }
+        var p = a.play();
+        if (p && p.catch) p.catch(function () { /* autoplay 被拦：首次手势后补播 */ });
+        if (allowFade && b.fadeIn) {
+            a.volume = 0;
+            rampBgmVolume(a, 0, 1);
+        } else {
+            a.volume = 1;
+        }
+        renderBgmPlayBtn();
+    }
+    /* 切到目标段（hit={b,key} 或 null＝停）。同 key 不动＝区间内跨行连播；
+       旧段配 fadeOut 先渐弱再切/停，新段配 fadeIn 渐强进场；试听与剧情都走这里。 */
+    function switchBgm(hit, allowFade) {
+        var key = hit ? hit.key : '';
+        if (key === state.bgmKey) return;
+        var oldB = currentPlayingBgm();
+        var a = state.bgmAudio;
+        var fadeOut = !!(allowFade && oldB && oldB.fadeOut && a && !a.paused);
+        state.bgmKey = key;
+        if (!hit) {
+            if (fadeOut) fadeOutStopAudio(a, hardStopAudio);
+            else { cancelBgmFade(); hardStopAudio(); }
+            renderBgmPlayBtn();
+            return;
+        }
+        var start = function () { startBgm(hit.b, allowFade); };
+        if (fadeOut) fadeOutStopAudio(a, start);
+        else start();
+    }
+    /* 播放模式专用：按行进/出区间切曲，同区间连播（淡入淡出也生效） */
+    function syncBgm(idx) {
+        if (state.mode !== 'play') return;
+        if (state.bgmResizing) return;
+        switchBgm(bgmAt(idx), true);
+    }
+    /* 编辑态试听：只有点右侧「播放」才走到这里；再点同一段＝停止（带该段 fadeOut） */
+    function previewBgm(j) {
+        var b = bgmList()[j];
+        if (!b) return;
+        var key = bgmKeyOf(b);
+        if (state.bgmKey === key && state.bgmAudio && !state.bgmAudio.paused) {
+            state.bgmKey = '';
+            if (b.fadeOut && state.bgmAudio) fadeOutStopAudio(state.bgmAudio, hardStopAudio);
+            else { cancelBgmFade(); hardStopAudio(); }
+            renderBgmPlayBtn();
+            return;
+        }
+        switchBgm({ b: b, key: key }, true);
+    }
+    function renderBgmPlayBtn() {
+        var btn = $('st-bgm-play');
+        if (!btn) return;
+        var b = bgmList()[state.bgmSel];
+        var active = !!(b && state.bgmKey === bgmKeyOf(b) && state.bgmAudio && !state.bgmAudio.paused);
+        btn.textContent = active ? '■ 停止' : '▶ 播放';
+        btn.classList.toggle('is-playing', active);
+    }
+    /* autoplay 被浏览器拦时，首次用户手势补播一次（仅当有区间在播且当前 paused） */
+    function resumeBgmOnGesture() {
+        var a = state.bgmAudio;
+        if (a && state.bgmKey && a.paused && a.getAttribute('src')) {
+            var p = a.play();
+            if (p && p.catch) p.catch(function () { });
+        }
+    }
+    async function loadBgms() {
+        var items = await listDir('../../static/bgm/');
+        state.bgmFiles = items.filter(function (x) { return !x.isDir && AUDIO_RE.test(x.name); })
+            .map(function (x) { return x.name; }).sort();
+        renderBgmPicker();
+    }
+    function isBgmDrag(evt) {
+        var dt = evt && evt.dataTransfer;
+        return !!(dt && dt.types && Array.prototype.indexOf.call(dt.types, BGM_MIME) >= 0);
+    }
+
     async function loadVoices(role) {
         var item = state.cast && state.cast[role];
         var dir = item && item.voiceDir;
@@ -929,6 +1396,7 @@
     function showEnd() {
         clearTimers();
         stopAllBlinks();
+        stopBgm();   // 全剧终：BGM 收尾
         state.ended = true;
         state.typing = false;
         $('st-text').textContent = '— 完 —';
@@ -965,7 +1433,9 @@
         applyLineStage(first, false);
     }
 
-    function renderLine(i) {
+    /* silent=true：只恢复当前行的画面与文本（关闭即时台词回剧本时用），
+       不跑打字机、不重播语音——否则「已经说过的台词会再说一遍」。 */
+    function renderLine(i, silent) {
         var list = lines();
         if (i >= list.length) { showEnd(); return; }
         clearTimers();
@@ -973,6 +1443,7 @@
         state.ended = false;
         state.idx = Math.max(0, i);
         state.lineStart = performance.now();
+        syncBgm(state.idx);   // 进入该行所属 BGM 区间；同区间跨行不打断
 
         var line = list[state.idx];
         var role = speakerOf(line);
@@ -984,6 +1455,18 @@
         if (window.SGDialog) window.SGDialog.setName(shownName);   // 名牌按名字长度选档并重擦
         setProgress();
         setHint(state.autoOn && state.mode === 'play' ? '自动推进中…' : '');
+
+        if (silent) {
+            // 整句直接落字，不打字、不播语音；AUTO 当作这句已显示完继续计时
+            $('st-text').textContent = line.text || '';
+            state.typing = false;
+            state.typeDone = null;
+            if (window.SGDialog) window.SGDialog.setCaret(state.mode === 'play' && !state.autoOn);
+            state.autoReady = true;
+            state.lineVoice = Promise.resolve(0);
+            armAuto(0);
+            return;
+        }
 
         // 逐角色演出：语音各走各的播放器与口型；动作已在 applyLineStage 里落过
         var token = state.voiceSeq;    // stopVoices 刚推进过，这句的语音只认这个令牌
@@ -1143,8 +1626,8 @@
         $('st-live-toggle').classList.remove('is-active');
         stopVoices();
         releaseBlobUrl();
-        // 回到剧本：重渲染当前行
-        if (state.mode === 'play') renderLine(state.idx);
+        // 回到剧本：只恢复当前行画面与文本，不重播已说过的台词/语音
+        if (state.mode === 'play') renderLine(state.idx, true);
     }
 
     /* 释放上一次导入的临时音频：回收 blob URL，并清掉它的解码缓冲
@@ -1306,6 +1789,7 @@
                 + '<span class="st-line-role"></span>'
                 + '<span class="st-line-flags"></span>'
                 + '<span class="st-line-text"></span>'
+                + '<span class="st-line-bg" title="拖背景图库里的图片到这儿，设为本行背景"></span>'
                 + '<span class="st-line-ops">'
                 + '<button type="button" data-op="up" title="上移">▲</button>'
                 + '<button type="button" data-op="down" title="下移">▼</button>'
@@ -1363,11 +1847,20 @@
                 flags.appendChild(s);
             });
             li.querySelector('.st-line-text').textContent = line.text || '';
+            // 行内背景：有 line.background 就显示缩略图 + 清除钮，空槽是拖放目标
+            var bgSlot = li.querySelector('.st-line-bg');
+            if (line.background) {
+                bgSlot.classList.add('has-bg');
+                bgSlot.style.backgroundImage = 'url("' + bgSrc(line.background) + '")';
+                bgSlot.title = '本行背景：' + line.background + '\n点右上角 ✕ 清除（回到场景背景）';
+                bgSlot.innerHTML = '<button type="button" class="st-line-bg-clear" data-op="clear-line-bg" title="清除本行背景">✕</button>';
+            }
             ol.appendChild(li);
         });
         if (state.sel >= lines().length) state.sel = Math.max(0, lines().length - 1);
         $('st-json-name').textContent = state.file;
         $('st-sel-idx').textContent = String(state.sel + 1);
+        renderBgmTrack();
     }
 
     /* 登场阵容：一行里同时管两件事——左边挑「这一场有谁」，右边三态定「这一句谁上/下场」。
@@ -2306,7 +2799,7 @@
     function renderProps() {
         if (!state.scene) return;
         setVal($('st-title'), state.scene.title || '');
-        fillSelect($('st-bg'), state.bg || [], state.scene.background || '', '（跟随上一场景）');
+        syncBgCurrent();
 
         var line = lines()[state.sel];
         $('st-sel-idx').textContent = String(state.sel + 1);
@@ -2366,6 +2859,7 @@
     function renderEditor() {
         renderList();
         renderProps();      // 里面会画角色卡
+        renderBgmDetail();  // 段配置面板跟随当前场景/选中段
         renderDrawer();
         // 选中哪一句，画布就预览哪一句的站位与上下场
         if (state.mode === 'edit') rebuildStaging(state.sel);
@@ -2376,6 +2870,7 @@
         if (state.mode === 'edit') rebuildStaging(i);
         renderList();
         renderProps();
+        clearBgmSel();   // 点台词行收起 BGM 配置；编辑态不自动试听
     }
 
     function addLine() {
@@ -2437,8 +2932,11 @@
     }
 
     function setMode(mode) {
+        var fromEdit = state.mode === 'edit';
         if (mode === 'edit' && state.liveOpen) closeLive();
         state.mode = mode;
+        // 编辑态的试听不能带进剧情：清空 key，让首句按区间从头起播
+        if (fromEdit && mode === 'play') stopBgm();
         root.setAttribute('data-mode', mode);
         var buttons = document.querySelectorAll('.st-modes button');
         for (var i = 0; i < buttons.length; i++) {
@@ -2491,17 +2989,94 @@
         state.scenes = j.scenes || [];
         var sel = $('st-scene');
         sel.innerHTML = '';
+        var menu = $('st-scene-menu');
+        menu.innerHTML = '';
         state.scenes.forEach(function (s) {
             var opt = document.createElement('option');
             opt.value = s.file;
             opt.textContent = s.title;
             sel.appendChild(opt);
+
+            var item = document.createElement('div');
+            item.className = 'st-scene-opt';
+            item.setAttribute('role', 'option');
+            item.dataset.file = s.file;
+            item.innerHTML = '<span class="st-scene-check"></span>' +
+                '<span class="st-scene-title"></span><span class="st-scene-file"></span>';
+            item.querySelector('.st-scene-title').textContent = s.title;
+            item.querySelector('.st-scene-file').textContent = s.file;
+            menu.appendChild(item);
         });
         var fromUrl = new URLSearchParams(location.search).get('scene');
         state.file = (fromUrl && state.scenes.some(function (s) { return s.file === fromUrl; }))
             ? fromUrl : (state.scenes[0] && state.scenes[0].file);
         if (state.file) sel.value = state.file;
+        syncScenePicker();
     }
+
+    /* 场景选择器：隐藏的 select 仍是数据载体与 change 事件源，
+       可见部分是自定义下拉，深色主题下可读，并显示文件名副信息。 */
+    function syncScenePicker() {
+        var sel = $('st-scene'), menu = $('st-scene-menu'), label = $('st-scene-label');
+        var s = state.scenes.filter(function (x) { return x.file === state.file; })[0];
+        label.textContent = s ? s.title : (state.file || '选择场景');
+        [].forEach.call(menu.children, function (item) {
+            item.setAttribute('aria-selected', item.dataset.file === state.file ? 'true' : 'false');
+            item.querySelector('.st-scene-check').textContent = item.dataset.file === state.file ? '✓' : '';
+        });
+    }
+    function openSceneMenu(open) {
+        var picker = $('st-scene-picker'), menu = $('st-scene-menu'), trig = $('st-scene-trigger');
+        picker.classList.toggle('is-open', open);
+        trig.setAttribute('aria-expanded', open ? 'true' : 'false');
+        menu.hidden = !open;
+        if (open) {
+            var active = menu.querySelector('[aria-selected="true"]') || menu.firstElementChild;
+            if (active) setSceneActive(active);
+        }
+    }
+    function setSceneActive(item) {
+        var menu = $('st-scene-menu');
+        [].forEach.call(menu.children, function (x) { x.classList.remove('is-active'); });
+        if (item) { item.classList.add('is-active'); item.scrollIntoView({ block: 'nearest' }); }
+    }
+    function pickScene(file) {
+        openSceneMenu(false);
+        if (!file || file === state.file) return;
+        var sel = $('st-scene');
+        sel.value = file;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    document.addEventListener('click', function (evt) {
+        var trig = evt.target.closest && evt.target.closest('#st-scene-trigger');
+        if (trig) { openSceneMenu($('st-scene-menu').hidden); return; }
+        var opt = evt.target.closest && evt.target.closest('.st-scene-opt');
+        if (opt) { pickScene(opt.dataset.file); return; }
+        if (!evt.target.closest || !evt.target.closest('#st-scene-picker')) openSceneMenu(false);
+    });
+    document.addEventListener('keydown', function (evt) {
+        var picker = $('st-scene-picker');
+        if (!picker) return;
+        var open = !$('st-scene-menu').hidden;
+        var trigFocus = document.activeElement === $('st-scene-trigger');
+        if ((trigFocus && (evt.key === 'Enter' || evt.key === ' ' || evt.key === 'ArrowDown')) ||
+            (open && evt.key === 'Escape')) {
+            evt.preventDefault();
+            openSceneMenu(!open);
+            if (open) $('st-scene-trigger').focus();
+            return;
+        }
+        if (!open) return;
+        var items = [].slice.call($('st-scene-menu').children);
+        var cur = items.indexOf($('st-scene-menu').querySelector('.is-active'));
+        if (evt.key === 'ArrowDown') { evt.preventDefault(); setSceneActive(items[(cur + 1) % items.length]); }
+        else if (evt.key === 'ArrowUp') { evt.preventDefault(); setSceneActive(items[(cur - 1 + items.length) % items.length]); }
+        else if (evt.key === 'Enter' || evt.key === ' ') {
+            evt.preventDefault();
+            var active = $('st-scene-menu').querySelector('.is-active');
+            if (active) pickScene(active.dataset.file);
+        }
+    });
 
     async function switchScene(file) {
         if (!file) return;
@@ -2519,9 +3094,12 @@
             }
             state.file = file;
             state.scene = scene;
+            syncScenePicker();
+            stopBgm();                // 换场停掉试听/剧情 BGM
             applyScene(scene, state.cast);
             stopAllBlinks();          // 换场＝换一套站位与动作，旧眨眼表作废
             stopVoices();
+            state.bgmSel = -1;        // 换场收起上一场的 BGM 段配置
             if (state.mode === 'play') {
                 state.stale = false;
                 primeStageForIntro();       // 动画期间先看到新剧本的完整场景
@@ -2581,6 +3159,9 @@
         var ol = $('st-lines');
         var dragFrom = -1;
 
+        // 浏览器 autoplay 被拦时，首次任意手势补播一次 BGM
+        document.addEventListener('pointerdown', resumeBgmOnGesture, true);
+
         ol.addEventListener('dragstart', function (evt) {
             dragFrom = indexOfLi(evt.target);
             if (dragFrom < 0) return;
@@ -2592,13 +3173,46 @@
             var li = evt.target.closest && evt.target.closest('.st-line');
             if (li) li.classList.remove('is-drag');
             dragFrom = -1;
+            [].forEach.call(document.querySelectorAll('.st-line-bg.is-over'), function (x) { x.classList.remove('is-over'); });
         });
         ol.addEventListener('dragover', function (evt) {
+            // 背景图库拖入：只认自定义 MIME，落到 .st-line-bg 槽上才接
+            if (isBgDrag(evt)) {
+                var slot = evt.target.closest && evt.target.closest('.st-line-bg');
+                if (slot) {
+                    evt.preventDefault();
+                    evt.dataTransfer.dropEffect = 'copy';
+                    [].forEach.call(document.querySelectorAll('.st-line-bg.is-over'), function (x) { if (x !== slot) x.classList.remove('is-over'); });
+                    slot.classList.add('is-over');
+                    return;
+                }
+            }
             if (dragFrom < 0) return;
             evt.preventDefault();
             evt.dataTransfer.dropEffect = 'move';
         });
+        ol.addEventListener('dragleave', function (evt) {
+            var slot = evt.target.closest && evt.target.closest('.st-line-bg');
+            if (slot && !(evt.relatedTarget && slot.contains(evt.relatedTarget))) slot.classList.remove('is-over');
+        });
         ol.addEventListener('drop', function (evt) {
+            var bgSlot = evt.target.closest && evt.target.closest('.st-line-bg');
+            if (isBgDrag(evt) && bgSlot) {
+                evt.preventDefault();
+                evt.stopPropagation();
+                bgSlot.classList.remove('is-over');
+                var name = evt.dataTransfer.getData(BG_MIME);
+                var i = Number(bgSlot.closest('.st-line').dataset.i);
+                var line = lines()[i];
+                if (line && name && (state.bg || []).indexOf(name) >= 0) {
+                    line.background = name;
+                    markStale();
+                    renderList();
+                    msg('本行背景已设为 ' + name);
+                }
+                dragFrom = -1;
+                return;
+            }
             if (dragFrom < 0) return;
             evt.preventDefault();
             var li = evt.target.closest && evt.target.closest('.st-line');
@@ -2611,6 +3225,199 @@
             dragFrom = -1;
         });
 
+        /* 背景图库拖放：图库项是唯一拖拽源；自定义 MIME 让外部文件拖入被拒 */
+        var gallery = $('st-bg-gallery');
+        gallery.addEventListener('dragstart', function (evt) {
+            var item = evt.target.closest && evt.target.closest('.st-bg-item');
+            if (!item) return;
+            evt.dataTransfer.effectAllowed = 'copy';
+            evt.dataTransfer.setData(BG_MIME, item.dataset.file);
+            evt.dataTransfer.setData('text/plain', item.dataset.file);
+        });
+
+        var bgDrop = $('st-bg-drop');
+        bgDrop.addEventListener('dragover', function (evt) {
+            if (!isBgDrag(evt)) return;              // 外部文件：不 preventDefault → 浏览器拒绝放下
+            evt.preventDefault();
+            evt.dataTransfer.dropEffect = 'copy';
+            bgDrop.classList.add('is-over');
+        });
+        bgDrop.addEventListener('dragleave', function (evt) {
+            if (!bgDrop.contains(evt.relatedTarget)) bgDrop.classList.remove('is-over');
+        });
+        bgDrop.addEventListener('drop', function (evt) {
+            bgDrop.classList.remove('is-over');
+            if (!isBgDrag(evt)) return;
+            evt.preventDefault();
+            var name = evt.dataTransfer.getData(BG_MIME);
+            if (!state.scene || !name || (state.bg || []).indexOf(name) < 0) return;
+            setSceneBackground(name);
+        });
+
+        /* ---- BGM：清单拖到竖轨落段；段内拖动按句吸附（整段平移 / 边缘改长度） ---- */
+        var picker = $('st-bgm-picker');
+        if (picker) picker.addEventListener('dragstart', function (evt) {
+            var item = evt.target.closest && evt.target.closest('.st-bgm-file');
+            if (!item) return;
+            evt.dataTransfer.effectAllowed = 'copy';
+            evt.dataTransfer.setData(BGM_MIME, item.dataset.file);
+            evt.dataTransfer.setData('text/plain', item.dataset.file);
+        });
+
+        var track = $('st-bgm-track');
+        if (track) {
+            track.addEventListener('dragover', function (evt) {
+                if (!isBgmDrag(evt)) return;          // 外部文件不接，浏览器拒绝放下
+                evt.preventDefault();
+                evt.dataTransfer.dropEffect = 'copy';
+            });
+            track.addEventListener('drop', function (evt) {
+                if (!isBgmDrag(evt)) return;
+                evt.preventDefault();
+                var name = evt.dataTransfer.getData(BGM_MIME);
+                if (!state.scene || !name || (state.bgmFiles || []).indexOf(name) < 0) return;
+                var row = rowAtY(evt.clientY);
+                if (row < 0) return;
+                addBgmAt(name, row);
+            });
+            /* pointer 拖动：整段＝平移，上下把手＝改端点。
+               delta 优先取「鼠标所在行 - 按下时所在行」，天然一格一格；
+               拖出列表范围时用平均行高兜底。监听挂在 document 上，重绘也不丢事件。 */
+            track.addEventListener('pointerdown', function (evt) {
+                if (state.mode !== 'edit') return;
+                var seg = evt.target.closest && evt.target.closest('.st-bgm-seg');
+                if (!seg) return;
+                evt.preventDefault();
+                var j = Number(seg.dataset.j);
+                var edgeEl = evt.target.closest && evt.target.closest('[data-bgm-edge]');
+                var edge = edgeEl ? edgeEl.dataset.bgmEdge : 'move';
+                var b = bgmList()[j];
+                if (!b) return;
+                var orig = bgmRange(b);
+                var ol = $('st-lines');
+                var n = ol.children.length;
+                if (!n) return;
+                var avgH = ol.getBoundingClientRect().height / n;
+                var bounds = bgmFreeBounds(j, orig, n);
+                var startY = evt.clientY;
+                var startRow = rowAtY(startY);
+                var moved = false;
+                var last = orig.slice();
+                state.bgmResizing = true;
+                var prevSelect = document.body.style.userSelect;
+                document.body.style.userSelect = 'none';
+                selectBgm(j);
+
+                function move(e) {
+                    var row = rowAtY(e.clientY);
+                    var d = (row >= 0 && startRow >= 0)
+                        ? row - startRow
+                        : Math.round((e.clientY - startY) / Math.max(1, avgH));
+                    if (!moved && !d) return;
+                    moved = true;
+                    var nf = orig[0], nt = orig[1];
+                    if (edge === 'move') {
+                        var w = orig[1] - orig[0];
+                        if (bounds.hi - bounds.lo >= w) {
+                            nf = Math.max(bounds.lo, Math.min(bounds.hi - w, orig[0] + d));
+                            nt = nf + w;
+                        }
+                    } else if (edge === 'from') {
+                        nf = Math.max(bounds.lo, Math.min(orig[1], orig[0] + d));
+                    } else {
+                        nt = Math.max(orig[0], Math.min(bounds.hi, orig[1] + d));
+                    }
+                    if (nf === last[0] && nt === last[1]) return;
+                    last = [nf, nt];
+                    setBgmRange(b, nf, nt);
+                    renderBgmTrack();
+                    renderBgmDetail();
+                }
+                function up() {
+                    document.removeEventListener('pointermove', move);
+                    document.removeEventListener('pointerup', up);
+                    document.removeEventListener('pointercancel', up);
+                    document.body.style.userSelect = prevSelect;
+                    state.bgmResizing = false;
+                    if (moved && (last[0] !== orig[0] || last[1] !== orig[1])) {
+                        markStale();
+                        msg('BGM ' + b.file + ' 覆盖第 ' + last[0] + '–' + last[1] + ' 句');
+                        if (state.bgmKey && state.bgmKey.indexOf('|' + b.file) >= 0) {
+                            state.bgmKey = bgmKeyOf(b);   // 正在试听：续播，不重头
+                        }
+                    }
+                    renderBgmTrack();
+                    renderBgmDetail();
+                }
+                document.addEventListener('pointermove', move);
+                document.addEventListener('pointerup', up);
+                document.addEventListener('pointercancel', up);
+            });
+            /* 点段＝选中并在右侧出配置；点轨道空白处＝收起。
+               pointerdown 里也会选中（拖动即时高亮），这里再兜一次纯 click/键盘触发。 */
+            track.addEventListener('click', function (evt) {
+                if (state.mode !== 'edit') return;
+                var seg = evt.target.closest && evt.target.closest('.st-bgm-seg');
+                if (!seg) { clearBgmSel(); return; }
+                // 点轨后让搜索框失焦，紧接着按 Backspace 才是删段而不是删搜索词
+                var ae = document.activeElement;
+                if (ae && ae !== document.body && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) ae.blur();
+                var j = Number(seg.dataset.j);
+                if (state.bgmSel !== j) selectBgm(j);
+            });
+        }
+
+        /* BGM 清单搜索 */
+        $('st-bgm-search').addEventListener('input', filterBgmPicker);
+        $('st-bgm-clear').addEventListener('click', function () {
+            $('st-bgm-search').value = '';
+            filterBgmPicker();
+        });
+
+        /* 右侧段配置：起止句直接改，播放是唯一试听入口 */
+        $('st-bgm-play').addEventListener('click', function () {
+            if (state.bgmSel >= 0) previewBgm(state.bgmSel);
+        });
+        $('st-bgm-del').addEventListener('click', function () {
+            if (state.bgmSel >= 0) delBgm(state.bgmSel);
+        });
+        [['st-bgm-fadein', 'fadeIn', '淡入'], ['st-bgm-fadeout', 'fadeOut', '淡出']].forEach(function (pair) {
+            $(pair[0]).addEventListener('click', function () {
+                var b = bgmList()[state.bgmSel];
+                if (!b) return;
+                b[pair[1]] = !b[pair[1]];
+                markStale();
+                renderBgmDetail();
+                msg('BGM ' + b.file + ' ' + (b[pair[1]] ? '开启' : '关闭') + pair[2]);
+            });
+        });
+        ['st-bgm-from', 'st-bgm-to'].forEach(function (id) {
+            $(id).addEventListener('change', function () {
+                var j = state.bgmSel;
+                var b = bgmList()[j];
+                if (!b) return;
+                var ol = $('st-lines');
+                var n = ol.children.length || 1;
+                var oldKey = bgmKeyOf(b);
+                var r = bgmRange(b);
+                var f = Math.max(1, Math.min(n, Number($('st-bgm-from').value) || r[0]));
+                var t = Math.max(1, Math.min(n, Number($('st-bgm-to').value) || r[1]));
+                if (f > t) { var s = f; f = t; t = s; }
+                var bounds = bgmFreeBounds(j, [f, t], n);
+                f = Math.max(bounds.lo, f);
+                t = Math.min(bounds.hi, t);
+                if (f > t) { f = r[0]; t = r[1]; }
+                if (f !== r[0] || t !== r[1]) {
+                    setBgmRange(b, f, t);
+                    markStale();
+                    if (state.bgmKey === oldKey) state.bgmKey = bgmKeyOf(b);
+                    msg('BGM ' + b.file + ' 覆盖第 ' + f + '–' + t + ' 句');
+                }
+                renderBgmTrack();
+                renderBgmDetail();
+            });
+        });
+
         $('st-add-line').addEventListener('click', addLine);
 
         $('st-title').addEventListener('input', function () {
@@ -2618,11 +3425,23 @@
             state.scene.title = this.value;
             markStale();
         });
-        $('st-bg').addEventListener('change', function () {
+        $('st-bg-search').addEventListener('input', filterBgGallery);
+        $('st-bg-search').addEventListener('keydown', function (evt) {
+            if (evt.key !== 'Enter') return;
+            // 回车：若搜索结果只有一张就直接选中它
+            var hits = [].filter.call($('st-bg-gallery').children, function (x) { return !x.hidden; });
+            if (hits.length === 1) { evt.preventDefault(); setSceneBackground(hits[0].dataset.file); }
+        });
+        $('st-bg-clear').addEventListener('click', function () {
             if (!state.scene) return;
-            if (this.value) state.scene.background = this.value;
-            else delete state.scene.background;
+            delete state.scene.background;
             markStale();
+            syncBgCurrent();
+            msg('已清除场景背景（跟随上一场景）');
+        });
+        $('st-bg-gallery').addEventListener('click', function (evt) {
+            var item = evt.target.closest && evt.target.closest('.st-bg-item');
+            if (item) setSceneBackground(item.dataset.file);
         });
 
         $('st-role').addEventListener('change', function () {
@@ -3225,6 +4044,13 @@
             var i = indexOfLi(op);
             if (op.dataset.op === 'up') shiftLine(i, -1);
             else if (op.dataset.op === 'down') shiftLine(i, 1);
+            else if (op.dataset.op === 'del-bgm') {
+                delBgm(Number(op.dataset.j));
+            }
+            else if (op.dataset.op === 'clear-line-bg') {
+                var cl = lines()[i];
+                if (cl) { delete cl.background; markStale(); renderList(); msg('已清除本行背景覆盖'); }
+            }
             else delLine(i);
             return;
         }
@@ -3236,10 +4062,23 @@
         if (evt.target.id === 'st-scene') switchScene(evt.target.value);
     });
 
+    /* 编辑态：选中 BGM 段后按 Backspace/Delete 就删除；在输入框里打字时不劫持 */
+    document.addEventListener('keydown', function (evt) {
+        if (state.mode !== 'edit' || state.bgmSel < 0) return;
+        if (evt.key !== 'Backspace' && evt.key !== 'Delete') return;
+        var t = evt.target;
+        if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+        evt.preventDefault();
+        delBgm(state.bgmSel);
+    });
+
     document.addEventListener('keydown', function (evt) {
         if (state.mode !== 'play' || state.liveOpen) return;
-        // 正在文本框/面板里输入时不劫持按键
-        if (evt.target && /^(INPUT|TEXTAREA|SELECT)$/.test(evt.target.tagName)) return;
+        // 场景下拉展开时由它自己处理方向键/回车，别当播放快捷键
+        if (!($('st-scene-menu') || {}).hidden) return;
+        // 正在文本框/面板/下拉按钮里输入时不劫持按键
+        if (evt.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(evt.target.tagName) ||
+            (evt.target.closest && evt.target.closest('#st-scene-picker')))) return;
         if (evt.key === ' ' || evt.key === 'Enter' || evt.key === 'ArrowRight') {
             evt.preventDefault();
             step();
@@ -3315,6 +4154,7 @@
             initLive();
             initAuto();
             loadBackgrounds();
+            loadBgms();
             loadModels();
         } catch (err) {
             console.error('[Story] 启动失败', err);
