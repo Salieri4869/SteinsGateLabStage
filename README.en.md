@@ -156,14 +156,14 @@ A scene can keep several characters on screen at once. Bind each role to a model
 `bgm` is optional and supports multiple segments. Each segment:
 
 - `file` — an audio filename under `static/bgm/`.
-- `range: [from, to]` — 1-based inclusive line range, e.g. `[1,3]` covers lines 1–3. The track loops within its range without restarting when advancing lines; it only switches/stops on entering another segment or leaving all ranges. Legacy `{ file, from, to }` entries are migrated to `range` on load.
+- `range: [from, to]` — 1-based inclusive line range, e.g. `[1,3]` covers lines 1–3. The track loops within its range without restarting when advancing lines; it only switches/stops on entering another segment or leaving all ranges.
 - `fadeIn` / `fadeOut` (optional booleans, default `false`) — `fadeIn` ramps volume up at start, `fadeOut` ramps it down on stop/segment switch, both about 1 second; they apply to both preview and playback.
 
 **In the editor**: the properties panel lists `static/bgm/` audio (filter it with the search box); drag one onto the BGM track at the right of the script lines to place a segment. Drag the whole segment to move it, or its top/bottom grips to resize — both snap to whole lines. The track is narrow, so segment names are written vertically with the range in small digits at the bottom. Click a segment to set its range, preview it, toggle "淡入"/"淡出" (fade in/out), or delete it in the right-side panel; `Backspace`/`Delete` also removes the selected segment. Editing never auto-plays; playback mode still follows lines automatically.
 
 ### Casting `stage`
 
-`x` is a fraction of canvas width (-1 left / +1 right), `scale` a relative size, `z` the stacking order — this is the scene's **default blocking**. A role with any `enter` is treated as entering mid-scene and starts hidden; other roles start on stage. Who enters/exits at which line is decided by that line's `enter`/`exit`. `stage` may be omitted: the roles seen in the lines are then spread evenly, so older scripts keep working unchanged.
+`x` is a fraction of canvas width (-1 left / +1 right), `scale` a relative size, `z` the stacking order — this is the scene's **default blocking**. A role with any `enter` is treated as entering mid-scene and starts hidden; other roles start on stage. Who enters/exits at which line is decided by that line's `enter`/`exit`. `stage` may be omitted: the roles seen in the lines are then spread evenly.
 
 ### Blocking and display name
 
@@ -196,7 +196,7 @@ Every role gets its own audio player, so lip-sync and playback stay on that char
 
 ### Auto-advance
 
-Auto-advance is not a line property: the `AUTO` button on the dialogue box (native `main.psb.m` slices, placed where the game puts it — bottom-left, `left:26 / top:1022`) is a global toggle. When lit, each line waits for the speaker's voice (plus that line's `wait`) and then advances; clicking the screen still advances immediately. The toggle is remembered in localStorage. The legacy per-line `auto` field is ignored on read and stripped on save.
+Auto-advance is not a line property: the `AUTO` button on the dialogue box (native `main.psb.m` slices, placed where the game puts it — bottom-left, `left:26 / top:1022`) is a global toggle. When lit, each line waits for the speaker's voice (plus that line's `wait`) and then advances; clicking the screen still advances immediately. The toggle is remembered in localStorage.
 
 ### Blinking `blink`
 

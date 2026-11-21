@@ -22,7 +22,7 @@
 //    · 行内 background 只覆盖本行，下一行自动回场景背景。
 //    · 站位的只读基准是 scene.stage，行内 move 改写当前站位；enter/exit 决定谁在台。
 //    · bgm 区间是绝对句号（剪辑软件 overwrite 语义），插行不平移；同区间跨行连播。
-//      对数据的读取/迁移（旧 from/to → range）在 bgmList()/bgmRange() 里做。
+//      range 归一化在 bgmRange() 里做。
 // ============================================================
 (function () {
     'use strict';
@@ -970,25 +970,13 @@
 
     /* ---- BGM：static/bgm/ 下的音频，按句区间循环播放 ----
        场景 JSON：bgm: [{ file, range: [起, 止] }]，句号 1-based 闭区间，可多段。
-       旧格式 { file, from, to } 读出即迁移成 range；保存时只写 range。
        单一 <audio loop>：同一区间跨行只认 key，key 不变则不暂停、不 seek、不重播。
        编辑态不自动播：必须点右侧「播放」才试听；播放模式仍按行自动同步。 */
     var BGM_MIME = 'application/x-emote-bgm';   // 只有曲目清单里的项携带它，外部文件拖入被拒
     function bgmUrl(file) { return '../../static/bgm/' + encodeURIComponent(file); }
     function bgmList() {
         var a = state.scene && state.scene.bgm;
-        if (!Array.isArray(a)) return [];
-        a.forEach(function (b) {
-            if (!b || Array.isArray(b.range)) return;
-            if (b.from != null || b.to != null) {
-                var f = Math.max(1, Number(b.from) || 1);
-                var t = Math.max(f, Number(b.to) || f);
-                b.range = [f, t];
-                delete b.from;
-                delete b.to;
-            }
-        });
-        return a;
+        return Array.isArray(a) ? a : [];
     }
     function bgmRange(b) {
         var r = b && b.range;
@@ -3135,7 +3123,7 @@
         try {
             // 只写场景默认站位；每行的 move 已经在 state.scene.lines 里，别把当前位置烤进 stage
             state.scene.stage = cloneStage(state.baseStage);
-            // auto 已废弃（改成播放界面的 AUTO 开关）：旧文件保存时顺手清掉
+            // auto 由播放界面的 AUTO 开关接管，不写进行数据
             (state.scene.lines || []).forEach(function (l) { if (l) delete l.auto; });
             await putJson(state.file, state.scene);
             await putJson('cast.json', state.cast);
