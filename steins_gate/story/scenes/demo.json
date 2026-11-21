@@ -122,15 +122,5 @@
       "z": 1
     }
   ],
-  "bgm": [
-    {
-      "file": "明透 - 04.illumina.flac",
-      "range": [
-        1,
-        3
-      ],
-      "fadeIn": false,
-      "fadeOut": true
-    }
-  ]
+  "bgm": []
 }

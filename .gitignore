@@ -118,11 +118,11 @@ dist
 
 #project
 AGENTS.md
-static/bgm/
 *.zip
 *.psb
 *.opus
 *.mp3
+*.flac
 *.xwma
 *.png
 *.jpg
