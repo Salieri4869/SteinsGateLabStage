@@ -102,12 +102,14 @@ class LipSyncPlayer {
 
         this.context = null;
         this.activeSource = null;
+        this.activeBuffer = null;     // 当前/暂停中的解码音频，resume 时按 offset 复用
+        this.activeUrl = null;
+        this.pausedAt = null;         // 暂停时的播放秒数；null = 没有可续播的现场
         this.bufferCache = new Map();
         this.timeline = null;
         this.startTime = 0;
         this.rafId = null;
         this.active = false;
-        this.context = null;
         this._playSeq = 0;
         this._unlockAt = 0;
         this._ctxWaiters = [];
@@ -144,9 +146,54 @@ class LipSyncPlayer {
         this._stopLipSync(120);
         const source = this.activeSource;
         this.activeSource = null;
+        this.activeBuffer = null;
+        this.activeUrl = null;
+        this.pausedAt = null;
         if (source) {
             try { source.stop(); } catch (_) { /* 已自然结束 */ }
         }
+    }
+
+    /* 暂停（编辑态冻结现场用）：记下当前音频与已播秒数，停掉 source 但保留解码结果。
+       WebAudio 的 AudioBufferSourceNode 不能 pause/resume，只能停掉后按 offset 重建。
+       返回本段已播秒数；若本来就没在播（含已自然结束）返回 0 且不留暂停点。 */
+    pause() {
+        const source = this.activeSource;
+        if (!source || !this.context || !this.activeBuffer) return 0;
+        const ctx = this.context;
+        const played = Math.max(0, ctx.currentTime - this.startTime);
+        this.pausedAt = played;
+        source.onended = null;                 // 暂停不算自然结束，别触发 stop() 链
+        try { source.stop(); } catch (_) { /* 已结束 */ }
+        this.activeSource = null;
+        this._stopLipSync(120);                // 收口型，fade 掉当前张嘴
+        return played;
+    }
+
+    hasPause() { return this.pausedAt != null && !!this.activeBuffer; }
+
+    /* 从暂停点续播：用缓存的解码结果，source.start(0, pausedAt) 从原位置开腔。
+       口型 startTime 回拨 pausedAt，让时间线对齐；onended 正常走 stop()。
+       Promise resolve 为「本段剩余毫秒」供 AUTO 续计时；无可续播现场则 resolve 0。 */
+    resume() {
+        if (!this.hasPause()) return Promise.resolve(0);
+        const buf = this.activeBuffer;
+        const at = this.pausedAt;
+        const url = this.activeUrl;
+        this.pausedAt = null;                  // 消费掉暂停点
+        const remainMs = Math.max(0, (buf.duration - at) * 1000);
+        const seq = ++this._playSeq;
+        return this._whenUnlocked().then((ctx) => {
+            if (!ctx || seq !== this._playSeq) return 0;
+            const source = ctx.createBufferSource();
+            source.buffer = buf;
+            source.connect(ctx.destination);
+            this.activeSource = source;
+            source.onended = () => { if (this.activeSource === source) this.stop(); };
+            this._startLipSync(buf, at);
+            source.start(0, at);
+            return remainMs;
+        }).catch(() => 0);
     }
 
     // ---- AudioContext ----
@@ -239,6 +286,9 @@ class LipSyncPlayer {
             source.connect(ctx.destination);
 
             this.activeSource = source;
+            this.activeBuffer = decoded;
+            this.activeUrl = url;
+            this.pausedAt = null;
             this._startLipSync(decoded);
 
             source.onended = () => {
@@ -264,13 +314,14 @@ class LipSyncPlayer {
     }
 
     // ---- 口型同步：离线分析 + rAF 查表 ----
-    _startLipSync(audioBuffer) {
+    _startLipSync(audioBuffer, offsetSec) {
+        // 续播时把起点回拨 offsetSec，让时间线 elapsed 从暂停处继续算，口型对得上音。
+        const ctx = this._context();
+        this.startTime = (ctx ? ctx.currentTime : 0) - (offsetSec || 0);
         const ls = this.config && this.config.lipsync;
         if (ls && ls.enabled === false) return;
 
         this.timeline = this.lipsync.analyzeAudioBuffer(audioBuffer);
-        const ctx = this._context();
-        this.startTime = ctx ? ctx.currentTime : 0;
         this.active = true;
         if (this.rafId) cancelAnimationFrame(this.rafId);
         this.rafId = requestAnimationFrame(() => this._tick());

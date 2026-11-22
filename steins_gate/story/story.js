@@ -56,6 +56,9 @@
         voiceSeq: 0,           // 语音令牌：翻页/停播就 +1，解码晚到的旧语音据此丢弃
         // 角色表页签：当前选中的角色 / 宏；bindOpen 记哪些角色卡展开了「绑定」
         castSel: '', castAct: null, bindOpen: {}, tab: 'script',
+        // 编辑态暂停现场：从播放切到编辑时冻结当前句的打字进度与语音 offset，
+        // 切回播放且剧本没改时从这里续播（不重跑开场、不重播语音）。
+        pausedPlayback: null,
         // 对话框（MSG WIN）实例：init 之后才有，重播开场要用
         dialog: null
     };
@@ -119,8 +122,8 @@
 
     /* ---------- 多角色登场 ---------- */
 
-    /* 把 scene.stage 归一化；缺省则从台词里出现的角色按先后均分站位，兼容旧场景。
-       每项：{ role, x(-1..1), scale, z }；旧数据的 show 字段忽略 */
+    /* 把 scene.stage 归一化；缺省则从台词里出现的角色按先后均分站位。
+       每项：{ role, x(-1..1), y(-1..1), scale, z }；y 缺省 0（基准高度） */
     function stageOf(scene, cast) {
         var declared = scene && scene.stage;
         var out = [];
@@ -130,6 +133,7 @@
                 out.push({
                     role: s.role,
                     x: Number.isFinite(s.x) ? s.x : 0,
+                    y: Number.isFinite(s.y) ? s.y : 0,
                     scale: Number.isFinite(s.scale) && s.scale > 0 ? s.scale : 1,
                     z: Number.isFinite(s.z) ? s.z : 0
                 });
@@ -144,7 +148,7 @@
             roles.forEach(function (r, i) {
                 out.push({ role: r,
                     x: roles.length > 1 ? (i / (roles.length - 1)) * 1.2 - 0.6 : 0,
-                    scale: 1, z: 0 });
+                    y: 0, scale: 1, z: 0 });
             });
         }
         return out;
@@ -152,7 +156,42 @@
 
     function cloneStage(list) {
         return (list || []).map(function (s) {
-            return { role: s.role, x: s.x, scale: s.scale, z: s.z };
+            return { role: s.role, x: s.x, y: s.y || 0, scale: s.scale, z: s.z };
+        });
+    }
+
+    /* 卡片上「换角色」：让新角色完整继承旧角色在本场的身份与行为。
+       只改 slot.role 会留下幽灵引用——剧本行的说话者/上下场/走位/cues 仍挂在旧角色名下，
+       表现为「换了模型，原来的动作和登场还在」。这里把这些引用一并改名：
+         · 登场槽位的 role
+         · 每行的说话者 role、enter/exit 数组、move 键、cues 键
+       行级 action/voice 属于说话者，随 role 改了自然跟着走；cast.json 的绑定/动作宏不动。
+       若新角色本来就在台或已在别处被引用，同名键会以新角色为准覆盖，避免两份行为打架。 */
+    function reassignRoleInScript(from, to) {
+        if (!from || !to || from === to) return;
+        (state.baseStage || []).forEach(function (s) {
+            if (s && s.role === from) s.role = to;
+        });
+        var renameList = function (v) {
+            return [].concat((v || [])).map(function (r) { return r === from ? to : r; });
+        };
+        lines().forEach(function (l) {
+            if (!l) return;
+            if (l.role === from) l.role = to;
+            ['enter', 'exit'].forEach(function (k) {
+                if (l[k] === undefined) return;
+                var next = renameList(l[k]);
+                // 去重：若新角色本就在列表里，改名后会出现两次
+                var uniq = [];
+                next.forEach(function (r) { if (uniq.indexOf(r) < 0) uniq.push(r); });
+                l[k] = uniq;
+            });
+            ['move', 'cues'].forEach(function (k) {
+                var bag = l[k];
+                if (!bag || !Object.prototype.hasOwnProperty.call(bag, from)) return;
+                bag[to] = bag[from];          // 新角色继承旧角色的走位/演出
+                delete bag[from];
+            });
         });
     }
     function slotOf(role) {
@@ -167,7 +206,7 @@
         }
         return null;
     }
-    /* 行内站位写法：数字 = 只改 x；对象 = { x, scale, z }，只写要改的字段 */
+    /* 行内站位写法：数字 = 只改 x；对象 = { x, y, scale, z }，只写要改的字段 */
     function moveOf(v) {
         if (typeof v === 'number' && isFinite(v)) return { x: v };
         if (v && typeof v === 'object' && !Array.isArray(v)) return v;
@@ -559,7 +598,7 @@
         state.stage.forEach(function (slot) {
             var b = baseSlotOf(slot.role);
             if (!b) return;
-            slot.x = b.x; slot.scale = b.scale; slot.z = b.z;
+            slot.x = b.x; slot.y = b.y || 0; slot.scale = b.scale; slot.z = b.z;
         });
     }
     function resetStage() {
@@ -574,7 +613,7 @@
     }
     function syncLayout() {
         var members = state.stage.map(function (slot) {
-            return { player: playerOf(slot.role), x: slot.x, scale: slot.scale };
+            return { player: playerOf(slot.role), x: slot.x, y: slot.y || 0, scale: slot.scale };
         }).filter(function (m) { return !!m.player; });
         if (!members.length) return;
         if (!state.layout) {
@@ -603,7 +642,7 @@
             var slot = slotOf(role);
             var d = moveOf(move[role]);
             if (!slot || !d) return;
-            ['x', 'scale', 'z'].forEach(function (k) {
+            ['x', 'y', 'scale', 'z'].forEach(function (k) {
                 if (!Number.isFinite(Number(d[k]))) return;
                 var to = Number(d[k]);
                 if (collect) collect.push({ slot: slot, key: k, from: slot[k], to: to });
@@ -1261,16 +1300,18 @@
         }).catch(function () { return 0; });
     }
 
-    /* 按固定速度打字；语音各走各的播放器，不必互相等待 */
-    function typeText(text, done) {
+    /* 按固定速度打字；语音各走各的播放器，不必互相等待。
+       from>0 表示从已打字数续打（编辑切回播放时用），不是从头重来。 */
+    function typeText(text, done, from) {
         var el = $('st-text-txt');
-        el.textContent = '';
+        var start = Math.max(0, from || 0);
+        el.textContent = (text || '').slice(0, start);
         if (window.SGDialog) { window.SGDialog.setCaret(false); window.SGDialog.setGear(false); }  // 打字中：▼ 与句末齿轮都灭
         state.typing = true;
         state.typeDone = done;
         state.seq++;
         var mySeq = state.seq;
-        var i = 0;
+        var i = start;
         (function tick() {
             if (mySeq !== state.seq) return;
             if (i >= text.length) {
@@ -1395,10 +1436,12 @@
         setProgress();
     }
 
-    /* 从第一行重播：把上/下场与站位状态复位，否则二周目人物会停在退场/走位后的状态 */
-    function restart() {
-        rebuildStaging(-1);
-        renderLine(0);
+    /* 从指定行重播：把上/下场与站位重放到该行之前，否则人物会停在退场/走位后的状态。
+       start 默认 0（完整重播）；编辑完从选中句开播时传那一行的下标。 */
+    function restart(start) {
+        var at = Math.max(0, start || 0);
+        rebuildStaging(at - 1);
+        renderLine(at);
     }
 
     /* 只把一行的舞台落到画面：背景、上/下场、站位、动作表情。
@@ -1414,12 +1457,14 @@
         });
     }
 
-    /* 对话框擦入动画开始前，先把首句的背景、登场角色、动作铺到画面上。
-       模型此时已加载完，动画期间用户看到的是完整场景，只差台词。 */
-    function primeStageForIntro() {
-        var first = lines()[0];
+    /* 对话框擦入动画开始前，先把起始句的背景、登场角色、动作铺到画面上。
+       模型此时已加载完，动画期间用户看到的是完整场景，只差台词。
+       start 默认 0；从中间句开播时传那一行，顺带把之前的 move/上下场重放一遍。 */
+    function primeStageForIntro(start) {
+        var at = Math.max(0, start || 0);
+        var first = lines()[at];
         if (!first) return;
-        rebuildStaging(-1);          // 编辑态可能预览过别处，先复位到开场站位
+        rebuildStaging(at - 1);      // 先重放到起始句之前，再落本句舞台
         applyLineStage(first, false);
     }
 
@@ -1923,9 +1968,14 @@
         });
         roleSel.value = role;
         roleSel.addEventListener('change', function () {
-            slot.role = this.value; markStale();
+            var next = this.value;
+            /* 换卡片角色＝让新角色继承旧角色在这场的全部行为：登场阵容里的位置/缩放，
+               以及剧本里所有引用旧角色的行（说话者、enter/exit、move、cues）。
+               只改 slot.role 会让旧角色的行为以幽灵引用留在剧本里，切回来又冒出来。 */
+            reassignRoleInScript(role, next);
+            markStale();
             rebuildStaging(state.sel);
-            renderRoster();            // 三排都跟着换角色
+            renderRoster(); renderList();   // 三排与行列表的小标都跟着换角色
         });
 
         // 三态：点哪边就只留哪边，同一角色不会同时进 enter 和 exit
@@ -1963,10 +2013,15 @@
             if (eff[k].role === role) { shown = eff[k]; break; }
         }
 
-        var posLbl = document.createElement('span');
-        posLbl.className = 'lbl'; posLbl.textContent = '位置';
+        var xLbl = document.createElement('span');
+        xLbl.className = 'lbl'; xLbl.textContent = 'X';
         var x = stageNumInput('st-stage-x', shown.x, '-1', '1',
             atScene ? '全场横向位置 -1..1' : (own ? '本行横向位置 -1..1' : '沿用上一句的水平位置'));
+        var yLbl = document.createElement('span');
+        yLbl.className = 'lbl'; yLbl.textContent = 'Y';
+        var y = stageNumInput('st-stage-y', shown.y || 0, '-1', '1',
+            atScene ? '全场纵向位置 -1..1（+ 上移 / - 下移）'
+                    : (own ? '本行纵向位置 -1..1' : '沿用上一句的纵向位置'));
         var scLbl = document.createElement('span');
         scLbl.className = 'lbl'; scLbl.textContent = '缩放';
         var sc = stageNumInput('st-stage-scale', shown.scale, '0.2', '2',
@@ -1988,13 +2043,13 @@
                     card.classList.remove('is-base');
                     card.classList.add('is-own');
                     reset.disabled = false;
-                    x.title = sc.title = '本行已改站位';
+                    x.title = y.title = sc.title = '本行已改站位';
                     renderList();                      // 行列表里的 ↔ 小标同步
                 }
                 rebuildStaging(state.sel);
             });
         }
-        bind(x, 'x'); bind(sc, 'scale');
+        bind(x, 'x'); bind(y, 'y'); bind(sc, 'scale');
 
         reset.addEventListener('click', function () {
             clearLineMove(role);
@@ -2003,7 +2058,8 @@
             renderList();
         });
 
-        posRow.appendChild(posLbl); posRow.appendChild(x);
+        posRow.appendChild(xLbl); posRow.appendChild(x);
+        posRow.appendChild(yLbl); posRow.appendChild(y);
         posRow.appendChild(scLbl); posRow.appendChild(sc);
         posRow.appendChild(reset);
         card.appendChild(posRow);
@@ -2201,7 +2257,7 @@
                 if (!d) return;
                 eff.forEach(function (s) {
                     if (s.role !== role) return;
-                    ['x', 'scale', 'z'].forEach(function (k) {
+                    ['x', 'y', 'scale', 'z'].forEach(function (k) {
                         if (Number.isFinite(Number(d[k]))) s[k] = Number(d[k]);
                     });
                 });
@@ -2216,7 +2272,7 @@
         var line = lines()[state.sel];
         if (!line) return;
         var cur = lineMove(line, role) || {};
-        var next = { x: cur.x, scale: cur.scale, z: cur.z };
+        var next = { x: cur.x, y: cur.y, scale: cur.scale, z: cur.z };
         next[key] = value;
         Object.keys(next).forEach(function (k) { if (next[k] === undefined) delete next[k]; });
         var mv = line.move || (line.move = {});
@@ -2917,22 +2973,115 @@
        不重播的话 HUD 会直接以「已铺开」的终态出现——切剧本、编辑↔播放来回切都看不到动画，
        看起来就像「这次没加载」。open() 内部从第 0 帧起跑，会先撤掉 is-open，
        所以 AUTO 提示牌的滑入也一并重来。 */
-    function playDialogIntro(done) {
+    function playDialogIntro(done, start) {
         if (!state.dialog) { if (done) done(); return; }
         state.dialog.fit();       // 视口可能变过（全屏/缩放），先按当前尺寸摆好
-        /* 预置首句名牌：擦入动画由 open() 的 50–58 帧统一负责，文字先就位，
-           这样开场播完 renderLine(0) 的 setName 看到名字没变就不会再擦一遍。 */
-        var firstName = displayNameAt(0);
+        /* 预置起始句名牌：擦入动画由 open() 的 50–58 帧统一负责，文字先就位，
+           这样开场播完 renderLine(start) 的 setName 看到名字没变就不会再擦一遍。
+           从中间句开播时用那句的称呼，别先亮首句的名字再改。 */
+        var at = Math.max(0, start || 0);
+        var firstName = displayNameAt(at);
         if (firstName) state.dialog.primeName(firstName);
         state.dialog.open(done);
     }
 
+    /* 播放 → 编辑：冻结现场供切回时续播。
+       语音不 destroy，只 pause（记 offset）；打字不补全，记住已打字数并停下 timer；
+       AUTO 计时停掉。快照挂在 state.pausedPlayback，切回播放时若剧本没改就照它续上。 */
+    function pauseForEdit() {
+        var line = currentLine();
+        var shown = $('st-text-txt') ? ($('st-text-txt').textContent || '').length : 0;
+        state.pausedPlayback = {
+            idx: state.idx,
+            text: line ? (line.text || '') : '',
+            typedChars: shown,
+            typing: !!state.typing,
+            speaker: state.speaker,
+            lineStart: state.lineStart
+        };
+        // 语音：暂停而非停止，保留每段的播放 offset
+        Object.keys(audioPool).forEach(function (r) {
+            try { audioPool[r].pause(); } catch (_) { /* 没在播 */ }
+        });
+        // 打字：停 timer，但保留已显示的文字与 typeDone，续播时从这里继续
+        if (state.typeTimer) { clearTimeout(state.typeTimer); state.typeTimer = null; }
+        if (state.autoTimer) { clearTimeout(state.autoTimer); state.autoTimer = null; }
+    }
+
+    /* 编辑 → 播放：剧本未改动时从暂停处续上，不重跑开场动画、不重播语音/打字。
+       - 打字：从 typedChars 接着打（已打完则直接补全并重新 armAuto）
+       - 语音：各角色 audioPlayer.resume() 从 offset 续播，说话者剩余时长喂给 AUTO
+       - AUTO：用「剩余语音 ms」续计时，lineStart 平移到冻结时刻，避免把编辑停留算进去
+       返回是否真的续播了。 */
+    function resumePlayback() {
+        var snap = state.pausedPlayback;
+        state.pausedPlayback = null;
+        if (!snap) return false;
+        var line = lines()[snap.idx];
+        if (!line) return false;
+
+        state.idx = snap.idx;
+        state.ended = false;
+        state.mode = 'play';
+        // 冻结期间经过的墙钟时间不算进本句：lineStart 重置到续播这一刻，
+        // speakerVoice 解析出的又是「剩余语音 ms」，两者相减正好是还要等多久。
+        state.lineStart = performance.now();
+
+        // 语音续播：说话者那段返回剩余毫秒，AUTO 据此续计时
+        var role = speakerOf(line);
+        var speakerVoice = Promise.resolve(0);
+        cueRoles(line).forEach(function (r) {
+            var cue = cueOf(line, r);
+            if (!cue.voice) return;
+            var ap = audioFor(r);
+            var p = ap.resume();
+            if (r === role) speakerVoice = p;
+        });
+        state.lineVoice = speakerVoice;
+        state.autoReady = false;
+
+        // 文字续打：已打完就直接补全，不再触发一次打字
+        var full = line.text || '';
+        var el = $('st-text-txt');
+        if (snap.typing && snap.typedChars < full.length) {
+            typeText(full, function () { onTyped(line, speakerVoice); }, snap.typedChars);
+        } else {
+            if (el) el.textContent = full;
+            state.typing = false;
+            state.typeDone = null;
+            if (window.SGDialog) window.SGDialog.setCaret(false);
+            syncGear();
+            state.autoReady = true;
+            armAuto(speakerVoice);
+        }
+        setProgress();
+        setHint(state.autoOn && state.mode === 'play' ? '自动推进中…' : '点击继续 ▸');
+        return true;
+    }
+
     function setMode(mode) {
         var fromEdit = state.mode === 'edit';
+        var fromPlay = state.mode === 'play';
         if (mode === 'edit' && state.liveOpen) closeLive();
+
+        /* 播放 → 编辑：冻结现场（语音暂停记 offset、打字停在当前字数），不销毁。
+           全剧终/开场动画未落字时没有可续播的现场，快照置空。 */
+        if (mode === 'edit') {
+            if (fromPlay && !state.ended && !state.introPending) pauseForEdit();
+            else state.pausedPlayback = null;
+        }
+
+        /* 从编辑切播放：若剧本没改、且选中的仍是暂停那一句 → 从暂停处续播；
+           否则（改了稿、或选了别的句）作废快照，走完整开播，落点由 startAt 决定。 */
+        var startAt = (fromEdit && mode === 'play')
+            ? Math.max(0, Math.min(state.sel, lines().length - 1)) : 0;
+        var canResume = fromEdit && mode === 'play' && !state.stale &&
+            state.pausedPlayback && state.pausedPlayback.idx === startAt;
+        if (fromEdit && mode === 'play' && !canResume) state.pausedPlayback = null;
+
         state.mode = mode;
-        // 编辑态的试听不能带进剧情：清空 key，让首句按区间从头起播
-        if (fromEdit && mode === 'play') stopBgm();
+        // 编辑态的试听不能带进剧情：续播时保留 BGM，其余情况清空 key 让起始句重新起播
+        if (fromEdit && mode === 'play' && !canResume) stopBgm();
         root.setAttribute('data-mode', mode);
         var buttons = document.querySelectorAll('.st-modes button');
         for (var i = 0; i < buttons.length; i++) {
@@ -2941,29 +3090,33 @@
         if (mode === 'edit') {
             stopAllBlinks();          // 编辑态预览别的动作，别让上一句的眨眼继续跑
             if (state.autoTimer) { clearTimeout(state.autoTimer); state.autoTimer = null; }
-            skipTyping();
+            // 语音/打字由 pauseForEdit 冻结；这里不再 stopVoices / skipTyping
             setHint('');
             // 选中正在播放的那一句，画布预览的站位/上下场与之前的画面保持一致
             state.sel = Math.min(state.idx, Math.max(0, lines().length - 1));
             renderEditor();
-        } else if (state.stale) {
+        } else if (canResume) {
+            resumePlayback();         // 不重跑开场动画、不重播语音：从冻结处接着走
+        } else if (state.stale || fromEdit) {
+            /* 剧本有改动，或从编辑页切过来（换了句/首次进入）：
+               走一次完整开播，落点由 startAt 决定。 */
             state.stale = false;
             refreshLiveRoles();
-            primeStageForIntro();       // 动画期间先看到新剧本的完整场景
+            primeStageForIntro(startAt);   // 动画期间先看到新剧本、起始句的完整场景
             state.introPending = true;
             var introDone = false;
             var finishIntro = function () {
                 if (introDone) return;
                 introDone = true;
                 state.introPending = false;
-                restart();
+                restart(startAt);          // 编辑后从选中句开播，不再总是第 0 行
             };
-            playDialogIntro(finishIntro);
+            playDialogIntro(finishIntro, startAt);
             setTimeout(finishIntro, 2000);
         } else {
             // 编辑模式可能预览过别的站位，回放前按当前播放行复位
             rebuildStaging(state.ended ? lines().length - 1 : state.idx);
-            playDialogIntro();
+            playDialogIntro(null, state.idx);
             if (state.ended) setHint('点击重新开始');
             else if (state.autoOn) armAuto(state.autoReady ? state.lineVoice : null);
             else setHint('点击继续 ▸');
@@ -2972,6 +3125,7 @@
 
     function applyScene(scene, cast) {
         state.sel = 0;
+        state.pausedPlayback = null;   // 换场：旧的暂停现场作废
         state.baseStage = stageOf(scene, cast);
         rebuildStaging(-1);       // 场景默认站位 + 开场显隐
         if (state.mode === 'edit') renderEditor();
@@ -3622,7 +3776,7 @@
             // 左右交替给个初始站位，避免新角色叠在同一侧；位置随后在角色卡第二排调
             state.baseStage.push({ role: pick,
                 x: used.length ? (used.length % 2 ? 0.4 : -0.4) : 0,
-                scale: 1, z: used.length });
+                y: 0, scale: 1, z: used.length });
             markStale();
             rebuildStaging(state.sel);
             renderRoster();

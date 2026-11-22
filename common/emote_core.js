@@ -248,10 +248,11 @@
                  armPose: pose, canvas: canvas };
     }
 
-    /* 多角色横向布局：与 createLayout 一样用视口高度算基准缩放，但每个角色可各自
-       指定水平位置 x（画布宽度比例，0 居中 / -1 最左 / +1 最右）与缩放系数 scale。
+    /* 多角色布局：与 createLayout 一样用视口高度算基准缩放，但每个角色可各自
+       指定水平位置 x（画布宽度比例，0 居中 / -1 最左 / +1 最右）、垂直位置 y
+       （画布高度比例，0 为基准线 / +1 上移 / -1 下移）与缩放系数 scale。
        所有角色共用一块 canvas 与一条 resize 监听；coord 是 SDK 内部缓冲坐标。
-       members: [{ player, x, scale }]（运行时原地改这个数组后再调 apply() 即可）
+       members: [{ player, x, y, scale }]（运行时原地改这个数组后再调 apply() 即可）
        opts: { verticalOffsetRatio, canvas, debug } → { apply, heightRatio } */
     function createCastLayout(members, opts) {
         opts = opts || {};
@@ -317,11 +318,13 @@
             members.forEach(function (m, i) {
                 var baseC = baseFor(m.player);
                 var x = Number(m.x) || 0;                 // 画布宽度比例
+                var y = Number(m.y) || 0;                 // 画布高度比例，+ 上移 / - 下移
                 var mul = Number.isFinite(m.scale) ? m.scale : 1;
                 m.player.scale = base * mul;
                 // x=-1 贴左、+1 贴右：可移动范围约半个画布宽，避免角色被裁掉
+                // y=+1 上移、-1 下移：同样用半个画布高作满幅；coord 纵向向上为负
                 m.player.coord = [baseC[0] + x * bw * 0.5,
-                                  baseC[1] - (0.5 - offsetRatio) * bh];
+                                  baseC[1] - (0.5 - offsetRatio) * bh - y * bh * 0.5];
             });
             if (typeof EmotePlayer !== 'undefined' && EmotePlayer.device) {
                 EmotePlayer.device.invalidateAnimation();

@@ -769,7 +769,8 @@
             border: 1px solid rgba(99,214,196,.2); border-radius: 3px; padding: 3px 5px;
         }
         .st-stage-row .st-stage-role { flex: 1; min-width: 0; }
-        .st-stage-row .st-stage-x, .st-stage-row .st-stage-scale { flex: none; width: 54px; text-align: center; }
+        .st-stage-row .st-stage-x, .st-stage-row .st-stage-y,
+        .st-stage-row .st-stage-scale { flex: none; width: 46px; text-align: center; }
         .st-stage-row .st-actor-row select[data-key] { flex: 1; min-width: 0; }
         .st-actor-top > button, .st-stage-reset {
             flex: none; width: 20px; height: 20px; padding: 0; cursor: pointer;
@@ -783,8 +784,10 @@
         .st-stage-reset:disabled:hover { color: #9fb8b4; background: transparent; border-color: rgba(99,214,196,.25); }
         /* 位置：第 1 行写的是全场默认；后面没改的行灰显沿用，改了就亮起来 */
         .st-stage-row:not(.is-base):not(.is-own) .st-stage-x,
+        .st-stage-row:not(.is-base):not(.is-own) .st-stage-y,
         .st-stage-row:not(.is-base):not(.is-own) .st-stage-scale { opacity: .55; }
         .st-stage-row.is-own .st-stage-x,
+        .st-stage-row.is-own .st-stage-y,
         .st-stage-row.is-own .st-stage-scale { border-color: rgba(226,164,95,.5); }
 
         /* 第四排：绑定（模型 / 语音目录），默认收起，只露一个摘要键 */

@@ -168,5 +168,10 @@
       }
     },
     "voiceDir": "../../character/sounds/suz/"
+  },
+  "香草": {
+    "actions": {},
+    "model": "香草/vanilla-casual.pure.psb.zip",
+    "voiceDir": "../../character/sounds/suz/"
   }
 }
