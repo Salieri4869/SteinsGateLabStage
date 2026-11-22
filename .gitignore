@@ -132,3 +132,5 @@ emotedriver.js
 emotedriver.wasm
 emoteplayer.js
 iemote.h
+# 本地测试剧本，不入库
+steins_gate/story/scenes/动作展示.json

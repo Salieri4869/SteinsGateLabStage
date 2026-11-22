@@ -115,6 +115,8 @@
         }
 
         var pose = await ModelLoader.attach(player, config.model.url, config.armPose);
+        /* 主时间线切换时按 PSB 首帧做变量级平滑 */
+        if (root.VariableTransition) root.VariableTransition.attach(player);
         player.diffTimelineSlot3 = '';
         player.diffTimelineSlot4 = '';
 
@@ -232,6 +234,7 @@
         }
 
         var pose = await ModelLoader.attach(player, config.model.url, config.armPose || 'crossed');
+        if (root.VariableTransition) root.VariableTransition.attach(player);
         player.diffTimelineSlot3 = '';
         player.diffTimelineSlot4 = '';
 

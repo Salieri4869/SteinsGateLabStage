@@ -1,15 +1,13 @@
 /* sg-dialog.js —— 剧情模式的对话框，用从 main.psb.m 拆出的 MSGWIN / name 还原
  *
- *  素材：main.psb/tex#000-texture.png 里上下排着 5 块 1920×290 的对话框层，
- *        全部按原矩形切出、无损转 webp（ui/msgwin_1..5_*.webp），开场 60 帧里都用上：
+ *  素材：游戏的对话框层，全部按原矩形切出、无损转 webp：
  *          1_lines 白色电路线（線のみ / 線のみ反転 两次擦除用的同一张）
  *          2_grad  灰渐变窗底（ベースグラデ 下的 ウィンドウ）
  *          3_dark  深色窗芯（中间那块黑色区域）
  *          4_dim   暗灰电路线（常态留在窗口上的装饰）
  *          5_mid   中间调电路线（白线转灰的过渡）
- *        另有 nameplate_* / namedeco_* / auto_* 等小件来自 tex#000 / tex#001。
  *
- *  数据来源：main.psb.m 的 MSGWIN.show（88 帧）/ deco_show（30 帧）与 name.wipe_*（30 帧）
+ *  数据来源：main.psb 的 MSGWIN.show（88 帧）/ deco_show（30 帧）与 name.wipe_*（30 帧）
  *   开屏是三段【串行】动画，PSB 里靠 t=59 的子运动触发串起来：
  *   ① MSGWIN.show 0–59 帧：白线两侧擦入（0–29）、反向擦出（30–59）；窗底渐变 0–59 擦入。
  *      t=59 同时触发 deco_show / name_on / state —— 所以装饰线和名牌都在对话框铺好之后才动。
@@ -610,6 +608,8 @@
            done 在名牌就位后才回调，剧情首句的打字/语音此时才启动。 */
         open: function (done) {
             st.open = 0; st.ready = false;
+            paintPlate(0);
+            if (el.deco) el.deco.style.opacity = '0';
             st.introMarks = [{ phase: 'win', t: performance.now() }];
             run(0, 59, (60 / FPS) * 1000 / (opt.speed * opt.openSpeed), paintWindow, function () {
                 st.introMarks.push({ phase: 'deco', t: performance.now() });

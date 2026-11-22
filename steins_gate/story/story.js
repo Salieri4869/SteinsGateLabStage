@@ -364,10 +364,10 @@
         if (act.timeline) player.mainTimelineLabel = act.timeline;
         if (act.diffSlot1 !== undefined) player.diffTimelineSlot1 = act.diffSlot1 || '';
         if (act.diffSlot2 !== undefined) player.diffTimelineSlot2 = act.diffSlot2 || '';
-        var base = Number.isFinite(act.duration) ? act.duration : DEFAULT_VAR_DURATION;
+        // 变量时长按配置原值执行：300ms 只是新增变量/舞台复制时的默认填写值，
         (act.variables || []).forEach(function (v) {
             if (!v || !v.name) return;
-            player.setVariable(v.name, v.value, Number.isFinite(v.duration) ? v.duration : base);
+            player.setVariable(v.name, v.value, v.duration);
         });
         startBlink(act, role);
     }
@@ -3032,6 +3032,15 @@
        不重播的话 HUD 会直接以「已铺开」的终态出现——切剧本、编辑↔播放来回切都看不到动画，
        看起来就像「这次没加载」。open() 内部从第 0 帧起跑，会先撤掉 is-open，
        所以 AUTO 提示牌的滑入也一并重来。 */
+    /* 开场动画（intro）串行令牌：进入剧情模式、切剧本、编辑→播放都可能起一次 intro，
+       每次带一个 2 秒兜底 timer。若在前一次 intro 还没结束时又起新的（典型：进故事模式
+       后马上切剧本），两个 timer 会各自触发一次 restart → 首句文字和语音播两遍。
+       它们各自的 introDone 只是局部变量，管不住对方。这里用模块级 seq：起 intro 时领取
+       一个序号，回调时只有仍是最新的那次才放行，过期的作废。 */
+    var introSeq = 0;
+    function beginIntro() { return ++introSeq; }
+    function introCurrent(seq) { return seq === introSeq; }
+
     function playDialogIntro(done, start) {
         if (!state.dialog) { if (done) done(); return; }
         state.dialog.fit();       // 视口可能变过（全屏/缩放），先按当前尺寸摆好
@@ -3163,9 +3172,10 @@
             refreshLiveRoles();
             primeStageForIntro(startAt);   // 动画期间先看到新剧本、起始句的完整场景
             state.introPending = true;
+            var myIntro = beginIntro();
             var introDone = false;
             var finishIntro = function () {
-                if (introDone) return;
+                if (introDone || !introCurrent(myIntro)) return;
                 introDone = true;
                 state.introPending = false;
                 restart(startAt);          // 编辑后从选中句开播，不再总是第 0 行
@@ -3287,10 +3297,16 @@
         }
     });
 
+    /* 场景切换串行令牌：getJson 是异步的，期间重复 change（双击菜单/键盘回环/事件兜底）
+       若都放行，会各自走一次 restart → 首句文字和语音播两遍。每次进入递增，await 回来
+       只有最新的一次才算数，先到的旧请求一律放弃。 */
+    var switchSeq = 0;
     async function switchScene(file) {
-        if (!file) return;
+        if (!file || file === state.file) return;
+        var seq = ++switchSeq;
         try {
             var scene = await getJson(file);
+            if (seq !== switchSeq) return;   // 期间又发了新的切换，这次作废
             var stage = stageOf(scene, state.cast);
             /* 本场若用到尚未加载的模型，wasm 一页只能起一次，整页重载 */
             var needReload = stage.some(function (s) {
@@ -3307,14 +3323,23 @@
             applyScene(scene, state.cast);
             stopAllBlinks();          // 换场＝换一套站位与动作，旧眨眼表作废
             stopVoices();
+            /* 静默清场：停掉上一场还在跑的打字机（clearTimers 里 seq++ 让旧 tick 早退），
+               并清空文字框。否则换场对话框动画这两秒里，旧台词会继续逐字打出、一直挂在
+               屏幕上，直到 restart() 落新句才被替换。名牌由 playDialogIntro 的 primeName
+               重设，不动 st-name。 */
+            clearTimers();
+            state.typing = false;
+            state.typeDone = null;
+            $('st-text-txt').textContent = '';
             state.bgmSel = -1;        // 换场收起上一场的 BGM 段配置
             if (state.mode === 'play') {
                 state.stale = false;
                 primeStageForIntro();       // 动画期间先看到新剧本的完整场景
                 state.introPending = true;
+                var myIntro = beginIntro();
                 var introDone = false;
                 var finish = function () {
-                    if (introDone) return;
+                    if (introDone || !introCurrent(myIntro)) return;
                     introDone = true;
                     state.introPending = false;
                     restart();
@@ -4354,9 +4379,10 @@
             root.classList.add('st-ready');
 
             state.introPending = true;
+            var myIntro = beginIntro();
             var introDone = false;
             var finishIntro = function () {
-                if (introDone) return;
+                if (introDone || !introCurrent(myIntro)) return;
                 introDone = true;
                 state.introPending = false;
                 renderLine(0);   // 名牌 + 文字 + 语音：等对话框擦入动画结束才出
