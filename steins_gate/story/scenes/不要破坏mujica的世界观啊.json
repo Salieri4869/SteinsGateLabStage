@@ -1,0 +1,147 @@
+{
+  "doc": "大杂烩",
+  "title": "不要破坏mujica的世界观啊",
+  "background": "background.jpg",
+  "lines": [
+    {
+      "role": "红莉栖",
+      "text": "SERN是个研究机构，并不是拥有权力的统制机构。我在网上对约翰·提托这么说过很多次",
+      "action": "平常",
+      "voice": "resg06_16_krs0005.xwma.opus",
+      "enter": [
+        "红莉栖"
+      ],
+      "background": "background.jpg"
+    },
+    {
+      "role": "红莉栖",
+      "text": "提托里面的人已经自报家门了，我不报出身份的话不是很不公平吗",
+      "action": "微笑",
+      "voice": "resg06_16_krs0006.xwma.opus",
+      "move": {
+        "香草": {
+          "x": -0.5
+        }
+      }
+    },
+    {
+      "role": "香草",
+      "text": "SERN在2036年也还是研究机构哦",
+      "cues": {
+        "红莉栖": {
+          "action": "吃惊"
+        }
+      },
+      "enter": [
+        "香草"
+      ],
+      "exit": [
+        "红莉栖"
+      ],
+      "move": {
+        "铃羽": {
+          "x": 0
+        },
+        "香草": {
+          "x": 0,
+          "y": -0.5
+        }
+      },
+      "voice": "resg06_16_suz0012.xwma.opus"
+    },
+    {
+      "role": "香草",
+      "text": "然后，牧濑红莉栖...",
+      "cues": {
+        "红莉栖": {
+          "action": "困扰"
+        },
+        "铃羽": {
+          "action": "生气"
+        }
+      },
+      "move": {
+        "红莉栖": {
+          "x": -0.38
+        },
+        "铃羽": {
+          "x": 0
+        },
+        "香草": {
+          "x": 0
+        }
+      },
+      "voice": "resg06_16_suz0016.xwma.opus"
+    },
+    {
+      "role": "香草",
+      "text": "2036年的你，作为时间机器之母而受到‘膜拜’",
+      "voice": "resg06_16_suz0017.xwma.opus"
+    },
+    {
+      "role": "红莉栖",
+      "text": "mobai?",
+      "action": "惊讶",
+      "voice": "resg06_16_krs0008.xwma.opus",
+      "wait": 1200,
+      "enter": [
+        "红莉栖"
+      ],
+      "move": {
+        "铃羽": {
+          "x": 0.38
+        },
+        "香草": {
+          "x": 0.38
+        }
+      },
+      "cues": {
+        "铃羽": {
+          "action": "生气"
+        }
+      }
+    },
+    {
+      "role": "香草",
+      "text": "......",
+      "move": {
+        "红莉栖": {
+          "scale": 1.5
+        },
+        "铃羽": {
+          "x": 0.38,
+          "scale": 1.5
+        }
+      },
+      "cues": {
+        "红莉栖": {
+          "action": {
+            "timeline": "表情_驚き01",
+            "diffSlot1": "腕差分A"
+          }
+        },
+        "铃羽": {
+          "action": "摇头",
+          "voice": ""
+        }
+      }
+    }
+  ],
+  "stage": [
+    {
+      "role": "香草",
+      "x": 0,
+      "y": -0.5,
+      "scale": 1.8,
+      "z": 1
+    },
+    {
+      "role": "红莉栖",
+      "x": 0,
+      "y": 0,
+      "scale": 1.5,
+      "z": 1
+    }
+  ],
+  "bgm": []
+}

@@ -68,6 +68,8 @@
     // 变量缺省时长（ms）：新建变量、粘贴导入缺 duration、演出兜底都用它，
     // 与 stage 的 DEFAULT_FADE_TIME 保持一致，避免 0 导致瞬间跳变。
     var DEFAULT_VAR_DURATION = 300;
+    // 上下场与背景切换的默认淡化时长（ms）。写 0 才是瞬间显隐。
+    var DEFAULT_FADE_MS = 300;
 
     /* 眨眼：只做「跟随 + 补眼皮」，节奏全交给 wasm 自带的自动眨眼。
        实测（2026-11-20）：
@@ -575,9 +577,28 @@
         }
         if (blinkRaf === null) blinkRaf = requestAnimationFrame(blinkFrame);
     }
-    function applyVisible(slot, visible) {
+    /* 显隐模型。fadeMs>0 时走 SDK 的 setGlobalAlpha，让 wasm 自己插值透明度：
+         · 淡出保持 hide=false —— practicalHide 依赖 wasm 里的 _globalA 才能判零停渲染，
+           提前 hide 会让 wasm 挂起、插值卡在半路。
+         · 淡入先解除 hide，再从 0 强制起渐变 —— SDK 里 _globalA 已是目标值会直接 return，
+           不先归零就会「瞬间出现」而不是淡入。
+       fadeMs=0 / 重放 / 编辑预览走原来的瞬时 hide 切换，并复位 alpha。 */
+    function applyVisible(slot, visible, fadeMs) {
         var p = playerOf(slot.role);
         if (!p) return;
+        p.convolveCanvasMovementToPhysics = false;   // 固定站位，移动物理会把它推走
+        var ms = Math.max(0, Number(fadeMs) || 0);
+        if (ms > 0) {
+            if (visible) {
+                p.hide = false;
+                p.setVariable('face_talk', 0, 0);     // 藏/露都归零，避免嘴停在上次的张开形状
+                p.setGlobalAlpha(0, 0);
+                p.setGlobalAlpha(1, ms);
+            } else {
+                p.setGlobalAlpha(0, ms);
+            }
+            return;
+        }
         var next = !visible;
         if (p.hide !== next) {
             // 隐藏期间 wasm 不接收变量写入，嘴会停在最后一张张开的形状上：
@@ -586,13 +607,22 @@
             p.hide = next;
             if (!p.hide) p.setVariable('face_talk', 0, 0);
         }
-        p.convolveCanvasMovementToPhysics = false;   // 固定站位，移动物理会把它推走
+        if (p.globalAlpha !== 1) p.setGlobalAlpha(1, 0);   // 复位，别把半透明带进下一场
     }
-    function applyStageEvents(line) {
+    /* 统一的淡化时长：行内 > 场景 > 默认 300ms。 */
+    function fadeMsOf(line) {
+        var raw = line && line.fadeMs != null ? line.fadeMs
+                : (state.scene && state.scene.fadeMs != null ? state.scene.fadeMs : DEFAULT_FADE_MS);
+        return Math.max(0, Number(raw) || 0);
+    }
+    /* 上下场事件。animate=false（从开场重放 / 编辑态预览）强制瞬时，
+       否则回放历史行会看到一串渐变。 */
+    function applyStageEvents(line, animate) {
         if (!line) return;
+        var ms = animate ? fadeMsOf(line) : 0;
         // 同一行同时勾了上/下场时，先退后进，最终以「登场」为准
-        [].concat(line.exit || []).forEach(function (r) { if (r) applyVisible({ role: r }, false); });
-        [].concat(line.enter || []).forEach(function (r) { if (r) applyVisible({ role: r }, true); });
+        [].concat(line.exit || []).forEach(function (r) { if (r) applyVisible({ role: r }, false, ms); });
+        [].concat(line.enter || []).forEach(function (r) { if (r) applyVisible({ role: r }, true, ms); });
     }
     function resetPositions() {
         state.stage.forEach(function (slot) {
@@ -692,7 +722,7 @@
         var list = lines();
         var last = Math.min(upto, list.length - 1);
         for (var i = 0; i <= last; i++) {
-            applyStageEvents(list[i]);
+            applyStageEvents(list[i], false);   // 重放只落终态，渐变留给实际演出
             applyMoveToSlots(list[i].move);
         }
         syncLayout();
@@ -1273,10 +1303,36 @@
         $('st-progress').textContent = total ? at + ' / ' + total : '';
     }
 
-    function applyBackground(name) {
-        document.body.style.backgroundImage = name
-            ? 'url("../../static/background/' + encodeURIComponent(name) + '")'
-            : '';
+    /* 背景交叉淡化：两层 div 轮流淡入淡出。新图先 Image 预加载完再挂到隐藏层，
+       过渡期间旧图还在，不会像直接换 body.backgroundImage 那样露出黑底。
+       fadeMs=0（重放/编辑/首帧）直接落值；seq 令牌让快速连翻时旧的加载回调作废。 */
+    var bgLayers = null, bgActive = 0, bgUrl = null, bgSeq = 0;
+    function applyBackground(name, fadeMs) {
+        if (!bgLayers) bgLayers = [$('st-bg-0'), $('st-bg-1')];
+        if (!bgLayers || !bgLayers[0] || !bgLayers[1]) return;
+        var rawUrl = name ? '../../static/background/' + encodeURIComponent(name) : '';
+        var url = rawUrl ? 'url("' + rawUrl + '")' : '';
+        if (url === bgUrl) return;                    // 同名背景：不重播淡化
+        var ms = Math.max(0, Number(fadeMs) || 0);
+        var seq = ++bgSeq, prev = bgActive, next = 1 - prev;
+        var commit = function () {
+            if (seq !== bgSeq) return;                // 期间又翻页了，这次切换作废
+            var el = bgLayers[next], old = bgLayers[prev];
+            el.style.transitionDuration = ms + 'ms';
+            old.style.transitionDuration = ms + 'ms';
+            el.style.backgroundImage = url;
+            void el.offsetWidth;                      // 强制 reflow，让 transition 从 opacity 0 起算
+            el.classList.add('is-on');
+            old.classList.remove('is-on');
+            bgActive = next;
+            bgUrl = url;
+        };
+        // 首帧、无动画、清空背景：直接落，不等加载
+        if (bgUrl === null || ms <= 0 || !url) { commit(); return; }
+        var img = new Image();
+        img.onload = commit;
+        img.onerror = commit;                         // 加载失败也切：纯色底好过卡住旧背景
+        img.src = rawUrl;
     }
 
     /* 返回 Promise<语音时长 ms>；失败或没写 voice 都 resolve(0)。
@@ -1448,9 +1504,10 @@
        与台词（名牌/打字/语音）分开，开场时先铺好它，等对话框动画结束再出词。
        全是幂等落值：动画前铺一次、renderLine 里再走一次不会叠加。 */
     function applyLineStage(line, animate) {
-        applyStageEvents(line);
+        applyStageEvents(line, animate);
         applyMoves(line, animate);
-        applyBackground(line.background || (state.scene && state.scene.background));
+        applyBackground(line.background || (state.scene && state.scene.background),
+            animate ? fadeMsOf(line) : 0);
         cueRoles(line).forEach(function (r) {
             var cue = cueOf(line, r);
             if (cue.action) applyAction(cue.action, r);
@@ -2908,6 +2965,8 @@
         renderList();
         renderProps();      // 里面会画角色卡
         renderBgmDetail();  // 段配置面板跟随当前场景/选中段
+        // 缺省显示默认 300 而不是空，让用户看得见当前生效值
+        setVal($('st-fade-ms'), fadeMsOf());
         renderDrawer();
         // 选中哪一句，画布就预览哪一句的站位与上下场
         if (state.mode === 'edit') rebuildStaging(state.sel);
@@ -3716,6 +3775,12 @@
             if (!line) return;
             if (this.value === '') delete line.wait;      // 留空＝用默认停顿
             else line.wait = Math.max(0, Number(this.value) || 0);
+            markStale();
+        });
+        $('st-fade-ms').addEventListener('input', function () {
+            // 场景级淡化时长（上下场 + 背景）；留空＝回到默认 300，写 0＝瞬间
+            if (this.value === '') delete state.scene.fadeMs;
+            else state.scene.fadeMs = Math.max(0, Number(this.value) || 0);
             markStale();
         });
         // 三态按钮 / 绑定展开 / 存为宏：都是动态生成的，用容器上的事件委托

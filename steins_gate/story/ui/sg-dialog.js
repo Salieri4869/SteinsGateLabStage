@@ -9,13 +9,15 @@
  *          5_mid   中间调电路线（白线转灰的过渡）
  *        另有 nameplate_* / namedeco_* / auto_* 等小件来自 tex#000 / tex#001。
  *
- *  数据来源：main.psb.m 的 MSGWIN.show（88 帧）与 name.wipe_*（30 帧）
- *    MSGWIN.show 0–59 帧：白线两侧擦入（0–29）、反向擦出（30–59）；窗底渐变 0–59 擦入
- *                 50–58 帧：装饰线与名牌淡入
- *    MSGWIN.deco_show：装饰线从中心向外擦开（29 帧），白线闪层收尾
- *                      → AUTO 打开时装饰线跑「充能」：上排从左往右铺满、下排从名牌中心向两侧展开，
- *                        都亮起后下排先收、上排再从左往右收走；AUTO 关掉只是静止的淡描边
- *    name      20 帧：名牌底板走 mesh 形变 —— 正菱形→横向纺锤→六边形（纯白形变层展开，
+ *  数据来源：main.psb.m 的 MSGWIN.show（88 帧）/ deco_show（30 帧）与 name.wipe_*（30 帧）
+ *   开屏是三段【串行】动画，PSB 里靠 t=59 的子运动触发串起来：
+ *   ① MSGWIN.show 0–59 帧：白线两侧擦入（0–29）、反向擦出（30–59）；窗底渐变 0–59 擦入。
+ *      t=59 同时触发 deco_show / name_on / state —— 所以装饰线和名牌都在对话框铺好之后才动。
+ *   ② MSGWIN.deco_show 0–29 帧：装饰线白亮层（名前飾りwhite = deco_lit）以 #mask/6
+ *      （tex#000 0353，1049×52，originX=525 正中）从【中间向两边】擦入亮起（wrt 1→0，0–19 帧）；
+ *      暗态底图（名前飾り = deco_dim）t=19 出现；白亮层 t=19–29 淡出 opa→0，恢复暗态常亮。
+ *      这就是「亮起→恢复」那一下。→ AUTO 打开后另有循环「充能」：上排左→右扫、下排中心→两侧展开。
+ *   ③ name 20 帧：名牌底板走 mesh 形变 —— 正菱形→横向纺锤→六边形（纯白形变层展开，
  *                    末段淡出交接给带网点纹理的正式底板，文字随后浮现）。截图实测三态：
  *                    菱形≈终态 1/7 宽、四角皆尖；纺锤左右拉到全宽、上下仍尖；
  *                    六边形顶边展开到约 82%、左右斜切 19px（正是底板素材轮廓）。
@@ -50,7 +52,8 @@
     var el = {};
     /* openSpeed：开场 60 帧按 1.8 倍速跑（≈1.1 秒）。原速 2 秒在剧情页里太拖。 */
     var opt = { feather: FEATHER, speed: 1, openSpeed: 1.8, base: 'ui/' };
-    var st = { open: 0, plate: 1, plateW: 0, name: null, raf: 0, fitRaf: 0, caret: true, decoRun: false, auto: false };
+    var st = { open: 0, ready: false, plate: 1, plateW: 0, name: null, raf: 0, fitRaf: 0, caret: true, decoRun: false, auto: false,
+               introMarks: [] };   // 开场三段起止时间戳，供验收精确判定串行时序
 
     /* 装饰线跑马灯：底图 1053×56 常亮，上面再叠一份提亮副本，
        靠 CSS 的 mask 光带 + animation 从左往右无限扫（周期 1.5s，见 index.html 的 sg-sweep）。 */
@@ -95,6 +98,29 @@
         var css = 'linear-gradient(90deg, #000 0%, #000 ' + Math.max(0, a - f) + '%,'
             + ' rgba(0,0,0,0) ' + a + '%, rgba(0,0,0,0) ' + (100 - a) + '%,'
             + ' #000 ' + Math.min(100, 100 - a + f) + '%, #000 100%)';
+        node.style.webkitMaskImage = css;
+        node.style.maskImage = css;
+        node.style.visibility = reveal <= 0.0015 ? 'hidden' : 'visible';
+    }
+
+    /* 中间向两边的对称擦入：reveal 0 全隐 / 1 全显。
+       原作 deco_show 的 #mask/6（0353）是 originX 居中的纺锤遮罩，
+       擦除从正中向两侧展开 —— 和窗口白线的「两侧向中间合拢」（wipeSides）正好相反。
+       这里用对称软边渐变近似：reveal 越大，中间不透明带越宽、向两端扩张。 */
+    function wipeCenterOut(node, reveal) {
+        if (!node) return;
+        if (reveal >= 0.999) {
+            node.style.webkitMaskImage = 'none';
+            node.style.maskImage = 'none';
+            node.style.visibility = 'visible';
+            return;
+        }
+        var r = clamp01(reveal);
+        var half = r * 50;                                   // 每侧从中心扩张的半宽
+        var f = Math.min(3, Math.max(0, 50 - half) * 2 + 0.2);
+        var css = 'linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0) ' + (50 - half - f) + '%,'
+            + ' #000 ' + (50 - half) + '%, #000 ' + (50 + half) + '%,'
+            + ' rgba(0,0,0,0) ' + (50 + half + f) + '%, rgba(0,0,0,0) 100%)';
         node.style.webkitMaskImage = css;
         node.style.maskImage = css;
         node.style.visibility = reveal <= 0.0015 ? 'hidden' : 'visible';
@@ -156,9 +182,49 @@
         });
         el.deco.appendChild(chg);
 
+        /* 开屏专用亮起层（deco_show）：与 AUTO 循环扫光完全分开的一套。
+           对话框铺好后，白亮图从正中向两边擦入亮起、再淡出恢复暗态底图，只播一次。 */
+        var intro = document.createElement('div');
+        intro.className = 'deco-intro';
+        intro.style.backgroundImage = 'url("' + litSrc + '")';
+        el.deco.appendChild(intro);
+
         el.decoBase = base;
         el.decoLit = wrap;
         el.decoChg = halves;
+        el.decoIntro = intro;
+    }
+
+    /* 开屏装饰线亮起（对应 MSGWIN.deco_show，30 帧 = 1s）：
+       0–19 帧白亮层以 #mask/6 从中间向两边擦入；19–29 帧白亮淡出、
+       露出一直在底下的暗态 deco_dim —— 即「亮起→恢复」。此后暗态常亮，
+       AUTO 的循环扫光另走 .deco-lit/.deco-chg，两者不打架。
+       动画期间临时关掉 is-auto，免得 AUTO 的 CSS 扫光叠在这一下上头。 */
+    var DECO_LIT_END = 19 / 30;
+    function paintDecoShow(v) {
+        v = clamp01(v);
+        if (!el.deco) return;
+        if (el.decoIntro) {
+            if (v <= DECO_LIT_END) {
+                wipeCenterOut(el.decoIntro, v / DECO_LIT_END);
+                el.decoIntro.style.opacity = '1';
+            } else {
+                wipeCenterOut(el.decoIntro, 1);
+                el.decoIntro.style.opacity = String(1 - (v - DECO_LIT_END) / (1 - DECO_LIT_END));
+            }
+        }
+    }
+    function runDecoShow(done) {
+        if (!el.deco || !el.decoIntro) { if (done) done(); return; }
+        var wasAuto = st.auto;
+        el.deco.classList.remove('is-auto');
+        el.deco.style.opacity = '1';              // 暗态底图全程在场
+        run(0, 1, (30 / FPS) * 1000 / (opt.speed * opt.openSpeed), paintDecoShow, function () {
+            wipeCenterOut(el.decoIntro, 0);
+            el.decoIntro.style.opacity = '0';
+            if (wasAuto) el.deco.classList.add('is-auto');
+            if (done) done();
+        });
     }
 
     /* 打开 AUTO 时把扫光从头播一遍：清掉动画 → 强制回流 → 还回去，
@@ -216,16 +282,9 @@
         fadeLayer(el.dim, 0);
         fadeLayer(el.mid, 0);
 
-        /* 装饰线在 50–58 帧露头（原样），名牌 mesh 形变另走 20 帧（t=39→59，与原作 name 20 帧一致）。
-           共用原来的 8 帧会把菱形/纺锤两态压进 0.15 秒、肉眼看不见。 */
-        var decoA = clamp01((t - 50) / 8);
-        if (el.deco) {
-            el.deco.style.opacity = String(decoA);
-            /* 装饰线在 50 帧露头，同时放跑马灯；窗口收回去时复位，下次开场能重跑 */
-            if (decoA > 0.02 && !st.decoRun) { st.decoRun = true; runDeco(); }
-            else if (decoA <= 0.02) st.decoRun = false;
-        }
-        paintPlate(clamp01((t - 39) / 20));
+        /* 装饰线和名牌不再由本函数驱动 —— 原作是 show 播完（t=59）才触发
+           deco_show → name，三段【串行】。见 open() 与 runDecoShow()。
+           setWindow(t) 是验收用的调试接口，要能独立摆出对话框某一帧，这里保持只铺窗底/白线。 */
         if (el.hud) el.hud.classList.toggle('is-open', t > 58);
     }
 
@@ -399,7 +458,7 @@
         setNameText(name);
         layoutPlate(pickPlate(name));
         if (prime) return;   // 预置：只摆文字与尺寸，显隐交给开场/后续 setName
-        if (st.open <= 58) return;   // 开场还没铺完：显隐由 open() 的 60 帧自己推，别抢
+        if (!st.ready) return;   // 开场三段还没播完：名牌显隐由 open() 的阶段③自己推，别抢
         if (el.deco) el.deco.style.opacity = '1';
         // 换了名字就重擦一次名牌；装饰线的扫光一直在循环跑，不打断它
         if (changed) {
@@ -536,7 +595,7 @@
             document.fonts.ready.then(function () {
                 if (!st.name) return;
                 layoutPlate(pickPlate(st.name));
-                if (st.open > 58) paintPlate(1);
+                if (st.ready) paintPlate(1);
             });
         }
         return api;
@@ -544,27 +603,68 @@
 
     var api = {
         init: init,
+        /* 开屏三段串行，照 main.psb.m 的 show → deco_show → name 触发顺序：
+           ① 0–59 铺对话框（窗底擦入 + 白线擦入擦出）
+           ② deco_show 30 帧：装饰线从中间向两边亮起再恢复暗态
+           ③ name 20 帧：名牌 mesh 形变（菱形→纺锤→六边形）
+           done 在名牌就位后才回调，剧情首句的打字/语音此时才启动。 */
         open: function (done) {
-            run(0, 59, (60 / FPS) * 1000 / (opt.speed * opt.openSpeed), paintWindow, done);
+            st.open = 0; st.ready = false;
+            st.introMarks = [{ phase: 'win', t: performance.now() }];
+            run(0, 59, (60 / FPS) * 1000 / (opt.speed * opt.openSpeed), paintWindow, function () {
+                st.introMarks.push({ phase: 'deco', t: performance.now() });
+                runDecoShow(function () {
+                    st.introMarks.push({ phase: 'name', t: performance.now() });
+                    if (el.deco) el.deco.style.opacity = '1';
+                    if (el.deco && st.auto && !st.decoRun) { st.decoRun = true; runDeco(); }
+                    paintPlate(0);
+                    run(0, 1, (20 / FPS) * 1000 / opt.speed, paintPlate, function () {
+                        st.introMarks.push({ phase: 'done', t: performance.now() });
+                        st.ready = true;
+                        if (done) done();
+                    });
+                });
+            });
         },
         close: function (done) {
-            run(59, 0, (60 / FPS) * 1000 / (opt.speed * opt.openSpeed), paintWindow, done);
+            /* 反向收起：名牌先灭、装饰线再灭，最后对话框擦出；次序与开屏相反。 */
+            run(1, 0, (20 / FPS) * 1000 / opt.speed, function (v) {
+                paintPlate(v);
+                if (el.deco) el.deco.style.opacity = String(v);
+            }, function () {
+                wipeCenterOut(el.decoIntro, 0);
+                run(59, 0, (60 / FPS) * 1000 / (opt.speed * opt.openSpeed), paintWindow, done);
+            });
+            st.open = 0; st.ready = false;
         },
         setName: setName,
         /* 开场前预置首句名牌（只摆文字/档位，不擦入）：避免名牌动画播两次 */
         primeName: function (text) { setName(text, true); },
         /* AUTO 开关：只有开着的时候装饰线才跑「充能」，关掉退回静态暗态 */
         setAuto: setAuto,
-        /* 直接跳到开场动画的第 t 帧（0–59），调试/预览用 */
-        setWindow: function (t) { paintWindow(Math.max(0, Math.min(59, t))); },
+        /* 直接跳到开场动画的第 t 帧（0–59），调试/验收用。
+           为兼容原有探针：同时按老的 t=39→59 映射摆出名牌三态、按 t≥50 摆出装饰线。
+           正常播放不走这里 —— open() 里三段是串行的。 */
+        setWindow: function (t) {
+            t = Math.max(0, Math.min(59, t));
+            paintWindow(t);
+            paintPlate(clamp01((t - 39) / 20));
+            if (el.deco) el.deco.style.opacity = String(clamp01((t - 50) / 8));
+        },
         showName: function () { run(st.plate, 1, (20 / FPS) * 1000, paintPlate); },
         hideName: function () { run(st.plate, 0, (20 / FPS) * 1000, paintPlate); },
         setCaret: setCaret,
         setGear: setGear,
+        /* 调试/验收：直接摆开屏第②段的装饰线帧（0–1），读中间亮带与白亮层形态。
+           不影响正常播放，也不改 st.ready/isOpen。 */
+        setDecoShow: function (v) { paintDecoShow(Math.max(0, Math.min(1, v))); },
+        introMarks: function () { return st.introMarks.slice(); },
         setSpeed: function (v) { opt.speed = v > 0 ? v : 1; },
         options: opt,
         fit: fit,
-        isOpen: function () { return st.open > 58; }
+        /* 整个开屏三段是否全部就位（对话框 + 装饰线亮起 + 名牌形变）。
+           剧情页据此决定何时启动打字/语音，验收也据此等开场结束。 */
+        isOpen: function () { return st.ready; }
     };
 
     global.SGDialog = api;

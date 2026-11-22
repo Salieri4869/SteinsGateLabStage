@@ -61,6 +61,15 @@
             font-weight: 500;
             font-size: var(--fs-base);
         }
+        /* 背景交叉淡化两层：底层是 body 的底色，两层图在 canvas 之下轮流淡入淡出。
+           新图先 Image 预加载再挂到隐藏层，过渡期间两层都在，不会露出黑底。 */
+        #st-bg-layers { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+        .st-bg-layer {
+            position: absolute; inset: 0;
+            background: center center / cover no-repeat;
+            opacity: 0; transition: opacity 300ms linear;
+        }
+        .st-bg-layer.is-on { opacity: 1; }
         #canvas {
             display: block; position: fixed; inset: 0;
             width: 100vw; height: 100vh; object-fit: contain;
@@ -222,6 +231,15 @@
            性能要点：高亮层 = 「动画 mask 的 wrapper」+「静态底图」。mask 动画写在带 filter 的元素上
            会让 filter 每帧重算（实测 12.1ms/帧）；亮/暗两态直接烘焙成两张图，连 filter 都省了。 */
         .hud-deco .deco-base { display: block; width: 1053px; height: 56px; }
+        /* 开屏专用亮起层（MSGWIN.deco_show）：白亮装饰线从正中向两边擦入、再淡出，
+           只播一次。独立于 .deco-lit/.deco-chg 的 AUTO 循环扫光，不受 .is-auto 控制。
+           mask 的展开进度与 opacity 由 sg-dialog.js 的 paintDecoShow 逐帧写。 */
+        .hud-deco .deco-intro {
+            position: absolute; left: 0; top: 0; width: 1053px; height: 56px;
+            display: block; pointer-events: none; opacity: 0; visibility: hidden;
+            background: url(ui/deco_lit.webp) no-repeat 0 0 / 1053px 56px;
+            will-change: mask-image, opacity;
+        }
         .hud-deco .deco-lit {
             position: absolute; left: 0; top: 0; width: 1053px; height: 56px;
             display: none; pointer-events: none;
@@ -856,6 +874,16 @@
             color: rgba(99,214,196,.85);
         }
         .st-sub h4 .st-sec-sub { margin-left: 6px; }
+        /* 场景级淡入淡出时长：标题栏里的小输入框，0＝瞬间显隐 */
+        .st-fade-field {
+            flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px;
+            font-size: 10px; color: rgba(159,184,180,.85); white-space: nowrap;
+        }
+        .st-fade-field input {
+            flex: none; width: 54px; padding: 3px 5px; text-align: center;
+            font-size: 10px; color: #d7e7e3; background: rgba(9,24,27,.75);
+            border: 1px solid rgba(99,214,196,.28); border-radius: 3px;
+        }
         #st-stage-add {
             flex: none; padding: 4px 9px; font-size: 10px; cursor: pointer;
             color: #9fb8b4; background: transparent;
