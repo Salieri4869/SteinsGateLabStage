@@ -143,7 +143,7 @@ A scene can keep several characters on screen at once. Bind each role to a model
 | `title` / `background` | scene | Title / background image |
 | `bgm` | scene | Background-music segment list, multiple allowed — see [below](#background-music-bgm) |
 | `stage` | scene | Default cast and blocking for the scene; optional — see [Casting `stage`](#casting-stage) |
-| `role` | line | This line's speaker; `action` comes from `cast[role].actions`, `voice` from `cast[role].voiceDir` |
+| `role` | line | This line's speaker; `action` comes from `cast[role].actions`, `voice` from `cast[role].voiceDir`. Empty (`""`) = narration: no nameplate (the decorative lines still show), see [Blocking and display name](#blocking-and-display-name) |
 | `text` / `name` | line | Dialogue / name shown in the textbox — see [Blocking and display name](#blocking-and-display-name) |
 | `action` / `voice` | line | Speaker's action macro / voice file |
 | `enter` / `exit` | line | Roles entering / leaving mid-scene on this line |
@@ -193,6 +193,8 @@ Character opacity is interpolated by the SDK's internal `_globalA`, so it costs 
 ```
 
 The default lives in `cast.json`: `{ "Kurisu": { "model": "...", "name": "Assistant" } }`; without it the key is used. The key is the internal id (script references, voice folders and model bindings all hang off it) — the display name only changes text on screen, so nothing breaks. In the editor there are two layers: the selected line's "Display name" applies **from that line on** (empty = inherit; `⟲` fills in the role's real name for a reveal; the adjacent "set as default" writes it as the role default), while the "Display name" on the cast tab is the **global default**.
+
+**Narration**: leave `role` empty (`""`) for a narration line — the textbox shows no character nameplate, while the decorative lines beside it still light up as usual. Text, typewriter and AUTO all work normally. Pick "Narration" in the editor's Speaker dropdown; the line's "Display name" field is disabled there since there is no nameplate to show. Blocking and lip-sync still follow the scene's default character, so an empty speaker does not lose staging.
 
 ### Cues
 

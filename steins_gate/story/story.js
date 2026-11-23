@@ -1542,7 +1542,9 @@
 
         applyLineStage(line, state.mode === 'play' && state.idx > 0);
         state.speaker = role;
-        var shownName = displayNameAt(state.idx);
+        /* 名牌显隐只看剧本里的 role 本身：空说话者＝旁白，传空名让 SGDialog 收起整块名牌。
+           speakerOf 的回退仍用于口型/站位，不能动，否则旁白行的默认演出会跟着变。 */
+        var shownName = line.role ? displayNameAt(state.idx) : '';
         $('st-name').classList.toggle('is-alias', shownName !== castName(role));   // 用的是别名/未知名时淡一点
         if (window.SGDialog) window.SGDialog.setName(shownName);   // 名牌按名字长度选档并重擦
         setProgress();
@@ -2915,9 +2917,12 @@
             renderRoster();
             return;
         }
-        var role = speakerOf(line);
+        /* 说话者可留空＝旁白：此时名牌不显示。
+           current 必须用剧本里的原始 line.role（而不是 speakerOf 的回退值），
+           否则空说话者会被画成第一个角色，用户没法在下拉里选「无」。
+           fillSelect 的第 4 参非空才会生成空值选项。 */
         fillSelect($('st-role'), castKeys(),
-            role, '', roleLabel);
+            line.role || '', '旁白', roleLabel);
         setVal($('st-line-text'), line.text || '');
         renderNameField(line);
 
@@ -2943,18 +2948,20 @@
         }
         var role = speakerOf(line);
         var own = typeof line.name === 'string' ? line.name : '';
-        field.disabled = false;
+        // 空说话者（旁白）没有名牌，显示名及其两个按钮一并禁用，避免改了却不生效
+        var noName = !line.role;
+        field.disabled = noName;
         field.value = own;
-        field.placeholder = '沿用：' + inheritedName(role, state.sel);
-        field.title = '这一句起对话框上显示的名字；留空＝沿用上一句。角色默认名「' + castName(role) + '」';
+        field.placeholder = noName ? '旁白' : '沿用：' + inheritedName(role, state.sel);
+        field.title = noName ? '这一句是旁白，没有说话者' : '这一句起对话框上显示的名字；留空＝沿用上一句。角色默认名「' + castName(role) + '」';
         if (btn) {
-            btn.disabled = false;
+            btn.disabled = noName;
             btn.title = '填入角色本名「' + castName(role) + '」（用来揭示真名）';
         }
         if (mk) {
             // 只有填了名字、且和当前默认名不同时才有意义
             var v = own.trim();
-            mk.disabled = !v || v === castName(role);
+            mk.disabled = noName || !v || v === castName(role);
             mk.title = v
                 ? '把「' + v + '」写成「' + role + '」的默认名，之后所有没单独改过的行都显示它'
                 : '先在左边填一个名字';
@@ -3048,8 +3055,11 @@
            这样开场播完 renderLine(start) 的 setName 看到名字没变就不会再擦一遍。
            从中间句开播时用那句的称呼，别先亮首句的名字再改。 */
         var at = Math.max(0, start || 0);
-        var firstName = displayNameAt(at);
-        if (firstName) state.dialog.primeName(firstName);
+        // 首行是空说话者（旁白）时预置空名，开场动画的装饰线/名牌层才不会亮起来。
+        // 必须无条件预置（含空串）：空串走 setName('') 会清掉上一场残留的 st.name。
+        var firstLine = lines()[at];
+        var firstName = (firstLine && firstLine.role) ? displayNameAt(at) : '';
+        state.dialog.primeName(firstName);
         state.dialog.open(done);
     }
 

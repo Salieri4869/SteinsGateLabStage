@@ -447,8 +447,8 @@
             st.name = '';
             setNameText('');
             paintPlate(0);
-            if (el.deco) el.deco.style.opacity = '0';
-            st.decoRun = false;
+            // 只收起名牌（底板+文字）：装饰线是独立元素，旁白行也照常显示
+            if (el.deco) el.deco.style.opacity = '1';
             return;
         }
         var changed = name !== st.name;
@@ -615,9 +615,18 @@
                 st.introMarks.push({ phase: 'deco', t: performance.now() });
                 runDecoShow(function () {
                     st.introMarks.push({ phase: 'name', t: performance.now() });
+                    // 装饰线独立于名牌：不管首行有没有说话者都照常点亮、AUTO 时照常跑充能
                     if (el.deco) el.deco.style.opacity = '1';
                     if (el.deco && st.auto && !st.decoRun) { st.decoRun = true; runDeco(); }
                     paintPlate(0);
+                    /* 首行是旁白（无说话者）时 primeName 收到空串，st.name 为空：
+                       只跳过名牌的擦入，避免闪出一块空名牌；装饰线仍按上面正常显示。 */
+                    if (!st.name) {
+                        st.introMarks.push({ phase: 'done', t: performance.now() });
+                        st.ready = true;
+                        if (done) done();
+                        return;
+                    }
                     run(0, 1, (20 / FPS) * 1000 / opt.speed, paintPlate, function () {
                         st.introMarks.push({ phase: 'done', t: performance.now() });
                         st.ready = true;

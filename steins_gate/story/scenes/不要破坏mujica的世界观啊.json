@@ -47,7 +47,8 @@
           "y": -0.5
         }
       },
-      "voice": "resg06_16_suz0012.xwma.opus"
+      "voice": "resg06_16_suz0012.xwma.opus",
+      "background": "ev_n001b.png"
     },
     {
       "role": "香草",
