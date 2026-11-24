@@ -79,7 +79,7 @@ node main.mjs --port 8000     # 或 ./run.sh 8000（macOS / Linux / Git Bash）
 |---|---|
 | `GET/PUT /api/order` | 读写角色顺序 `character/actions_config/order.json` |
 | `GET /api/thumbs`、`PUT /api/thumb` | 背景缩略图落到 `static/background/.thumbs/` |
-| `GET/PUT /api/story` | 读写 `steins_gate/story/cast.json` 与 `steins_gate/story/scenes/*.json` |
+| `GET/PUT /api/story` | 读写 `steins_gate/edit/cast.json` 与 `steins_gate/edit/scenes/*.json`（编辑工作台数据；播放页也通过此接口共用） |
 | `GET /api/voice` | 列出即时台词音频（`steins_gate/story/voices/`） |
 | `GET /api/voice?name=…` | 流式播放音频，支持 Range（可拖动进度） |
 | `POST /api/voice`（octet-stream） | 外部导入音频落盘，上限 12MB（页面「选择音频」「音频列表」都不走这里，不写盘） |
@@ -107,7 +107,7 @@ node main.mjs --port 8000     # 或 ./run.sh 8000（macOS / Linux / Git Bash）
 
 ## 场景数据格式
 
-> 本节是剧情模式字段定义的**唯一权威出处**。示例见 `steins_gate/story/scenes/demo.json`。
+> 本节是剧情模式字段定义的**唯一权威出处**。示例见 `steins_gate/edit/scenes/demo.json`。
 
 一个场景可让多名角色同台。`cast.json` 先为每个角色绑定模型，场景用 `stage` 声明谁上场、站哪：
 

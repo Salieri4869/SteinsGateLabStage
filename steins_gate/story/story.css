@@ -135,10 +135,10 @@
         #st-msg:empty { display: none; }
         #st-progress { font: 500 var(--fs-sm)/1 ui-monospace, Consolas, monospace; color: var(--text-3); }
         .st-spacer { flex: 1; }
-        /* 播放/编辑做成一整组分段控件，边界清楚，一眼看出是互斥的两态 */
+        /* 播放/编辑只作并排布局，不再画整组外框：
+           否则「编辑 ↗」会被组外框 + 自身边框夹成双层框，和顶栏其它按钮明显不齐。 */
         .st-modes {
-            display: flex; gap: 2px; padding: 2px;
-            background: rgba(0,0,0,.32); border: 1px solid var(--hairline); border-radius: var(--radius);
+            display: flex; align-items: center; gap: 2px;
         }
         .st-modes button, #st-save, #st-add-line, #st-full {
             background: transparent; color: var(--text-3); cursor: pointer;
@@ -170,6 +170,16 @@
         #st-add-line { padding: 5px 12px; color: var(--accent); border-color: var(--accent-line); }
         #st-add-line:hover { color: var(--surface-0); background: var(--accent); border-color: var(--accent); }
         .st-modes button.is-active { color: var(--surface-0); background: var(--accent); border-color: var(--accent); }
+        /* 剧情页→编辑页 / 编辑页→剧情页 的跳转入口，外观与模式按钮一致 */
+        .st-goto-edit, .st-goto-play {
+            display: inline-flex; align-items: center; height: 27px; padding: 0 14px;
+            text-decoration: none; white-space: nowrap; cursor: pointer;
+            font-size: var(--fs-base); font-family: inherit; color: var(--accent);
+            background: var(--accent-soft); border: 1px solid var(--accent-line);
+            border-radius: 4px; transition: color .15s, background .15s;
+        }
+        .st-goto-edit:hover, .st-goto-play:hover { color: var(--surface-0); background: var(--accent); }
+        .st-goto-edit:focus-visible, .st-goto-play:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
         #st-save[disabled] { opacity: .45; cursor: default; }
         /* 保存按钮就绪态用主色强调，草稿态与可用态一眼可分 */
         #st-save:not([disabled]) { color: var(--surface-0); background: var(--accent); border-color: var(--accent); }
@@ -434,6 +444,19 @@
             background: transparent; border: 1px solid rgba(233,185,110,.4); border-radius: 4px; }
         #st-live-toggle:hover, #st-live-toggle.is-active { color: #07141a; background: #e9b96e; border-color: #e9b96e; }
 
+        /* 顶栏四个操作按钮统一尺寸：即时台词 / 播放 / 编辑 / 全屏。
+           之前各自用 padding 撑高，实测是 29 / 31 / 27 / 33px 参差不齐，「编辑」还写死 height:27px。
+           这里统一成 32px 高、13px/400 字重、4px 圆角，各按钮原有的配色语义保持不变。 */
+        #st-live-toggle, .st-modes button, .st-goto-edit, #st-full {
+            box-sizing: border-box;
+            height: 32px;
+            padding: 0 14px;
+            font-size: 13px;
+            font-weight: 400;
+            line-height: 1;
+            border-radius: 4px;
+        }
+
         /* ---- 即时台词面板 ---- */
         #st-live {
             position: fixed; top: 56px; right: 18px; z-index: 8; width: 340px;
@@ -485,24 +508,303 @@
         .st-live-note { font-size: 10.5px; line-height: 1.5; color: rgba(230,241,239,.5); margin-top: 6px; min-height: 1em; }
         .st-live-note.err { color: #e9b96e; }
 
-        /* ---- 编辑器 ---- */
+        /* ---- 编辑器：四区工作台 -------------------------------------------
+           顶栏工具条 / 左导航 / 中(预览+工作区) / 右检查器 / 底部问题面板。
+           布局用 CSS 变量驱动，分割条拖动时由 JS 改变量即可，不改任何 DOM 钩子。
+           --nav-w / --inspector-w / --preview-h 存 localStorage，下次打开保持。 */
         #st-editor {
             position: fixed; top: 48px; bottom: 0; left: 0; right: 0; z-index: 6;
-            display: none; gap: 14px; padding: 18px;
-            background: rgba(4, 12, 17, .78);
+            display: none;
+            background: var(--surface-0);
+            --nav-w: 320px;
+            --inspector-w: 340px;
+            --preview-h: 32%;
+            --linebar-w: 38%;
+            --cast-roles-w: 190px;
+            --cast-acts-w: 282px;
         }
-        html[data-mode="edit"] #st-editor { display: flex; }
+        html[data-mode="edit"] #st-editor { display: grid; grid-template-rows: auto minmax(0,1fr) auto; }
+
+        /* 独立编辑页专属的 #st-bar / #st-editor / #st-full-exit 覆盖已移到 edit/edit.css，
+           story.css 不再写 html[data-editor="1"] 规则（两页耦合点）。 */
+        #st-editor:fullscreen { width: 100vw; height: 100vh; }
+
+        /* 工具栏主页 / 剧情预览 / 全屏，风格与工作台按钮一致 */
+        .wb-home, .wb-play, .wb-full {
+            display: inline-flex; align-items: center; justify-content: center; white-space: nowrap;
+            padding: 5px 12px; font-size: var(--fs-base); font-family: inherit; cursor: pointer;
+            color: var(--text-2); background: var(--surface-2);
+            border: 1px solid var(--hairline); border-radius: var(--radius-sm); text-decoration: none;
+            transition: color .15s, background .15s, border-color .15s;
+        }
+        .wb-home:hover, .wb-play:hover, .wb-full:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+        .wb-play { color: var(--accent); border-color: var(--accent-line); }
+        .wb-full.is-on { color: var(--surface-0); background: var(--accent); border-color: var(--accent); }
+
+        /* 工作台顶栏 */
+        .wb-toolbar {
+            display: flex; align-items: center; gap: 8px;
+            height: 46px; padding: 0 14px; flex: none;
+            background: linear-gradient(180deg, #0d242c, #0a1d24);
+            border-bottom: 1px solid var(--hairline);
+        }
+        .wb-tool-sep { width: 1px; height: 20px; background: var(--hairline); flex: none; }
+        .wb-spacer { flex: 1; }
+        .wb-icon-btn {
+            width: 30px; height: 28px; flex: none; cursor: pointer; font-size: 17px; line-height: 1;
+            color: var(--text-2); background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+        }
+        .wb-icon-btn:hover:not([disabled]) { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+        .wb-icon-btn[disabled] { opacity: .32; cursor: default; }
+        .wb-search { position: relative; display: flex; align-items: center; }
+        .wb-search input {
+            width: 230px; padding: 6px 10px; font-size: var(--fs-md); font-family: inherit;
+            color: var(--text-1); background: var(--surface-2);
+            border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+        }
+        .wb-search input::placeholder { color: var(--text-4); }
+        .wb-search input:focus { outline: none; border-color: var(--accent-line); }
+        .wb-search-count {
+            position: absolute; right: 8px; font: 500 var(--fs-xs)/1 ui-monospace, Consolas, monospace;
+            color: var(--text-4); pointer-events: none;
+        }
+        .wb-issue-badge {
+            padding: 5px 10px; font-size: var(--fs-sm); cursor: pointer; white-space: nowrap;
+            color: var(--accent); background: var(--accent-soft);
+            border: 1px solid var(--accent-line); border-radius: 12px;
+        }
+        .wb-issue-badge.has-issue { color: #ffd9a8; background: var(--amber-soft); border-color: var(--amber-line); }
+        .wb-issue-badge:hover { filter: brightness(1.2); }
+
+        /* 主体三栏 grid：左栏 | 分割 | 中栏 | 分割 | 右栏 */
+        .wb-body {
+            display: grid; min-height: 0;
+            grid-template-columns: var(--nav-w) 6px minmax(0,1fr) 6px var(--inspector-w);
+        }
+        .wb-split {
+            background: var(--surface-2); cursor: col-resize; position: relative; flex: none;
+            transition: background .12s;
+        }
+        .wb-split::after {
+            content: ''; position: absolute; inset: 0 2px; border-radius: 2px;
+            background: var(--hairline);
+        }
+        .wb-split:hover, .wb-split.is-drag { background: var(--accent-soft); }
+        .wb-split:hover::after, .wb-split.is-drag::after { background: var(--accent); }
+        .wb-split--h { cursor: row-resize; height: 6px; flex: none; }
+        .wb-split--h::after { inset: 2px 0; }
+        body.wb-resizing { cursor: col-resize; user-select: none; }
+        body.wb-resizing-v { cursor: row-resize; user-select: none; }
+
+        /* 左导航 */
+        .wb-nav {
+            display: flex; flex-direction: column; min-height: 0; min-width: 0;
+            background: var(--surface-1); border-right: 1px solid var(--hairline);
+            padding: 10px 8px; gap: 12px;
+        }
+        .wb-nav-head {
+            display: flex; align-items: center; justify-content: space-between;
+            font-size: var(--fs-sm); letter-spacing: .1em; color: var(--text-3); padding: 2px 4px;
+        }
+        .wb-nav-collapse {
+            width: 20px; height: 20px; cursor: pointer; font-size: 14px; line-height: 1;
+            color: var(--text-3); background: transparent; border: 1px solid var(--hairline); border-radius: 3px;
+        }
+        .wb-nav-group { display: flex; flex-direction: column; min-height: 0; }
+        .wb-nav-group-title {
+            display: flex; align-items: center; gap: 6px;
+            font-size: var(--fs-xs); letter-spacing: .08em; color: var(--text-4);
+            padding: 0 4px 5px; border-bottom: 1px solid var(--hairline); margin-bottom: 5px;
+        }
+        /* 剧本下拉 + 新建/删除按钮 */
+        .wb-scene-bar { display: flex; align-items: center; gap: 4px; }
+        .wb-scene-bar select {
+            flex: 1; min-width: 0; height: 28px; padding: 0 6px; font-size: var(--fs-md); font-family: inherit;
+            color: var(--text-1); background: var(--surface-2);
+            border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+        }
+        .wb-scene-bar button {
+            width: 26px; height: 28px; flex: none; cursor: pointer; font-size: 15px; line-height: 1; font-family: inherit;
+            color: var(--text-2); background: var(--surface-2);
+            border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+        }
+        .wb-scene-bar button:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+        .wb-scene-bar #wb-scene-del:hover { color: #ff9c92; border-color: rgba(217,104,90,.5); background: rgba(217,104,90,.12); }
+        /* 左栏场景检查器：紧凑显示，但图库/搜索/配置面板保持可用 */
+        .wb-nav-scene-props { flex: 1; overflow-y: auto; min-height: 0; }
+        .wb-nav-scene-props .st-sec { padding: 0; border: none; background: transparent; }
+        .wb-nav-scene-props .st-sec h3 { display: none; }
+        .wb-nav-scene-props .st-bg-gallery { grid-template-columns: repeat(auto-fill, minmax(56px,1fr)); max-height: 116px; }
+        .wb-nav-scene-props .st-bgm-picker,
+        .wb-nav-scene-props .st-sfx-picker { grid-template-columns: repeat(auto-fill, minmax(56px,1fr)); max-height: 96px; }
+        .wb-nav-scene-props .st-bg-preview { height: 64px; }
+        .wb-nav-scene-props .st-field-note { display: none; }
+        .wb-nav-scene-props .st-bgm-field { margin-top: 9px; }
+        .wb-nav-scene-props .st-sfx-field { margin-top: 9px; padding-top: 7px; }
+        .wb-nav-scene-props .st-bgm-detail { padding: 8px; }
+        .wb-nav-foot { margin-top: auto; font-size: var(--fs-xs); color: var(--text-4); line-height: 1.6; padding: 0 4px; }
+
+        /* 中栏：预览 + 分割 + 工作区 */
+        .wb-center {
+            display: grid; grid-template-rows: var(--preview-h) 6px minmax(0,1fr);
+            min-width: 0; min-height: 0; background: var(--surface-0);
+        }
+        /* 顶部两大专区：左「台词」编辑卡 + 右「实时预览」画面卡。
+           两者是平级独立模块（各自标题栏/边框），中间分割条可左右拖动。 */
+        .wb-top { display: flex; min-height: 0; min-width: 0; }
+        .wb-preview {
+            position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0;
+            margin: 8px 10px 0 0; padding: 6px 8px 8px;
+            background: var(--surface-1); border: 1px solid var(--hairline);
+            border-radius: var(--radius); box-shadow: 0 4px 18px rgba(0,0,0,.2);
+        }
+        .wb-preview-head {
+            display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            padding-bottom: 6px; flex: none;
+        }
+        .wb-preview-title { font-size: var(--fs-sm); color: var(--text-2); letter-spacing: .04em; }
+        .wb-preview-title small { color: var(--text-4); margin-left: 6px; font: 400 var(--fs-xs)/1 ui-monospace, monospace; }
+        .wb-preview-ctl { display: flex; align-items: center; gap: 3px; }
+        .wb-preview-ctl button {
+            min-width: 24px; height: 22px; padding: 0 7px; cursor: pointer; font-size: var(--fs-sm); font-family: inherit;
+            color: var(--text-2); background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+        }
+        .wb-preview-ctl button:hover { color: var(--accent); border-color: var(--accent-line); }
+        .wb-preview-viewport {
+            position: relative; flex: 1; min-height: 0; overflow: auto;
+            background: #04090c; border: 1px solid var(--hairline); border-radius: var(--radius);
+            display: flex; align-items: center; justify-content: center;
+        }
+        /* inner 的像素尺寸由 wbPreviewApplyZoom() 按镜像画布宽高比算出：
+           默认 fit＝完整等比显示（不裁切），放大后可用滚动条查看四周。 */
+        .wb-preview-inner {
+            position: relative; flex: none; margin: auto;
+            width: 960px; height: 540px;
+            box-shadow: 0 0 0 1px rgba(99,214,196,.12);
+        }
+        .wb-preview-bg { position: absolute; inset: 0; background: #0a1418 center center / cover no-repeat; }
+        .wb-preview-canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+        /* 右下角斜向拖拽：放大/缩小整个预览窗（改 --preview-h） */
+        .wb-preview-grip {
+            position: absolute; right: 3px; bottom: 3px; z-index: 4;
+            width: 18px; height: 18px; cursor: nwse-resize; border-radius: 3px;
+            background: linear-gradient(135deg, transparent 44%, var(--accent) 44% 53%, transparent 53%),
+                        linear-gradient(135deg, transparent 66%, var(--accent) 66% 75%, transparent 75%);
+            opacity: .55;
+        }
+        .wb-preview-grip:hover { opacity: 1; }
+        .wb-preview-grip.is-drag { opacity: 1; filter: drop-shadow(0 0 5px var(--accent)); }
+        /* 台词模块：独立卡片，紧凑排版；说话者/显示名/文本/停顿都在同一水平带 */
+        .wb-linebar {
+            display: flex; flex-direction: column; gap: 5px; flex: none; overflow-x: hidden; overflow-y: auto;
+            width: var(--linebar-w, 38%); min-width: 280px; max-width: 70%;
+            margin: 8px 0 0 10px; padding: 6px 9px 8px;
+            background: var(--surface-1); border: 1px solid var(--hairline);
+            border-radius: var(--radius); box-shadow: 0 4px 18px rgba(0,0,0,.2);
+        }
+        .wb-split--inline { align-self: stretch; margin-top: 8px; width: 6px; flex: 0 0 6px; }
+        .wb-linebar[hidden] { display: none; }
+        .wb-linebar-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+        .wb-linebar-title { font-size: var(--fs-sm); font-weight: 600; color: var(--accent); white-space: nowrap; }
+        .wb-linebar-line { font: 400 var(--fs-xs)/1 ui-monospace, monospace; color: var(--text-4); }
+        /* 说话者 + 显示名：固定两列，同类控件顶部严丝合缝对齐在同一行。
+           minmax(0,...) 保证窄栏里列可被压缩，按钮组 flex-wrap 不溢出。 */
+        .wb-linebar-people { display: grid; grid-template-columns: minmax(0,.85fr) minmax(0,1.4fr); gap: 6px; align-items: start; }
+        .st-field--inline { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        /* 只裁切字段标签文字；.st-inline 是输入控件容器，不能被这条规则压成 14px
+           （否则内部 26px 高的输入框/按钮会被 overflow:hidden 裁掉一截）。 */
+        .st-field--inline > span:not(.st-inline) { font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .wb-linebar .st-field--inline > span:not(.st-inline) { height: 14px; line-height: 14px; }
+        .wb-linebar select, .wb-linebar input, .wb-linebar textarea, .wb-linebar .st-inline button {
+            height: 26px; padding-top: 2px; padding-bottom: 2px; font-size: var(--fs-sm);
+        }
+        .wb-linebar textarea { height: auto; min-height: 40px; line-height: 1.4; }
+        .wb-linebar .st-inline { display: flex; align-items: center; gap: 3px; min-width: 0; flex-wrap: nowrap; }
+        .wb-linebar .st-inline input { flex: 1; min-width: 40px; }
+        .wb-linebar .st-inline button { min-width: 22px; flex: none; padding-left: 4px; padding-right: 4px; }
+        .wb-linebar .st-inline button.st-quiet { min-width: 20px; font-size: var(--fs-xs); }
+        .st-field--inline select, .st-field--inline input { width: 100%; }
+        .st-field--inline textarea { width: 100%; resize: vertical; }
+        .wb-linebar-wait input { max-width: 120px; }
+        /* 改动历史（左侧项目树，固定排在最底） */
+        .wb-nav-history { min-height: 0; flex: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hairline); }
+        .wb-hist-count { color: var(--text-4); font: 400 var(--fs-xs)/1 ui-monospace, monospace; }
+        .wb-hist-list { overflow-y: auto; min-height: 0; max-height: 160px; display: flex; flex-direction: column; gap: 2px; }
+        /* 历史条目：动作类型标（新增/删除/改动） */
+        .wb-hist-act {
+            flex: none; padding: 1px 4px; border-radius: 3px; font: 500 var(--fs-xs)/1.4 ui-monospace, monospace;
+            color: var(--text-3); background: var(--surface-2);
+        }
+        .wb-hist-act[data-act="新增"] { color: #9ee6b4; background: rgba(88,196,124,.16); }
+        .wb-hist-act[data-act="删除"] { color: #ffb3ab; background: rgba(217,104,90,.16); }
+        .wb-hist-act[data-act="重排"] { color: #bcd0f5; background: rgba(120,160,230,.16); }
+        .wb-hist-item {
+            display: flex; align-items: center; gap: 6px; padding: 4px 7px; cursor: pointer;
+            font-size: var(--fs-xs); color: var(--text-3); background: transparent;
+            border: 1px solid transparent; border-radius: var(--radius-sm); text-align: left;
+        }
+        .wb-hist-item:hover { color: var(--accent); background: var(--accent-soft); }
+        .wb-hist-item.is-on { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+        .wb-hist-item.is-preview { color: #ffd9a8; border-color: var(--amber-line); }
+        .wb-hist-idx { flex: none; font: 500 var(--fs-xs)/1 ui-monospace, monospace; opacity: .7; min-width: 18px; }
+        .wb-hist-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .wb-preview-hint {
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            font-size: var(--fs-md); color: var(--text-4); pointer-events: none;
+        }
+        .wb-preview-hint[hidden] { display: none; }
+        /* 预览字幕：点某句立即显示该句的说话者与台词，空格=播放/暂停逐字预览 */
+        .wb-preview-caption {
+            position: absolute; left: 8%; right: 8%; bottom: 6%; z-index: 3;
+            min-height: 2.6em; padding: 6px 12px; box-sizing: border-box;
+            background: rgba(4,12,17,.82); border: 1px solid var(--accent-line);
+            border-radius: var(--radius-sm); pointer-events: none;
+        }
+        .wb-preview-caption[hidden] { display: none; }
+        .wb-pv-cap-name { display: block; font-size: var(--fs-sm); color: var(--accent); margin-bottom: 2px; }
+        .wb-pv-cap-text { display: block; font-size: var(--fs-md); line-height: 1.5; color: var(--text-1); }
+        .wb-preview.is-playing .wb-preview-title::after { content: ' · 播放中'; color: var(--accent); }
+
+        .wb-work { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 0 10px 10px; }
+
+        /* 右检查器：沿用 .st-col 外观，宽度交给 grid 列 */
         .st-col {
             display: flex; flex-direction: column; min-width: 0; min-height: 0;
             background: var(--surface-1); border: 1px solid var(--hairline);
-            border-radius: var(--radius-lg); padding: 16px;
+            border-radius: var(--radius-lg); padding: 14px;
             box-shadow: 0 6px 28px rgba(0,0,0,.28);
         }
-        .st-col--lines { flex: 1; }
-        .st-col--props { width: 372px; flex: none; }
+        .st-col--props { min-width: 0; }
         .st-col-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
         .st-col h2 { font-size: var(--fs-base); font-weight: 500; color: var(--accent); }
         .st-head-ops { display: flex; align-items: center; gap: 6px; }
+
+        /* 底部问题面板 */
+        .wb-issues {
+            flex: none; max-height: 210px; display: flex; flex-direction: column;
+            background: var(--surface-1); border-top: 1px solid var(--hairline);
+        }
+        .wb-issues[hidden] { display: none; }
+        .wb-issues-head {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 7px 14px; font-size: var(--fs-sm); color: var(--amber);
+            border-bottom: 1px solid var(--hairline); flex: none;
+        }
+        .wb-issues-head button {
+            cursor: pointer; font-size: 16px; line-height: 1; color: var(--text-3);
+            background: transparent; border: none;
+        }
+        .wb-issues-head button:hover { color: var(--text-1); }
+        .wb-issues-list { overflow-y: auto; padding: 5px 0; }
+        .wb-issue {
+            display: flex; align-items: flex-start; gap: 8px; padding: 5px 14px;
+            font-size: var(--fs-md); color: var(--text-2); line-height: 1.5; cursor: pointer;
+        }
+        .wb-issue:hover { background: var(--accent-soft); }
+        .wb-issue-sev { flex: none; font: 600 var(--fs-xs)/1.5 ui-monospace, monospace; padding: 1px 5px; border-radius: 3px; }
+        .wb-issue--warn .wb-issue-sev { color: #ffd9a8; background: var(--amber-soft); }
+        .wb-issue--err .wb-issue-sev { color: #ffb3ab; background: rgba(217,104,90,.16); }
+        .wb-issues-empty { padding: 10px 14px; font-size: var(--fs-md); color: var(--accent); }
 
         /* 行列表与 BGM 竖轨共用同一个滚动容器：滚动时段落始终贴着自己的台词行 */
         .st-lines-wrap { display: flex; flex: 1; min-height: 0; gap: 6px; overflow-y: auto; }
@@ -589,23 +891,13 @@
             flex: 1; min-width: 0; font-size: var(--fs-base); color: var(--text-2);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        /* 行内背景槽：拖图库里的背景到这里＝本行背景覆盖，缩略图常驻显示 */
+        /* 剧本行背景缩略图：只读预览，编辑统一走时间轴背景轨 */
         .st-line-bg {
-            flex: none; position: relative; width: 54px; height: 22px; border-radius: 3px;
+            flex: none; width: 54px; height: 22px; border-radius: 3px;
             background: rgba(0,0,0,.22) center center / cover no-repeat;
-            border: 1px dashed rgba(99,214,196,.22); transition: border-color .12s, box-shadow .12s;
+            border: 1px solid rgba(99,214,196,.3);
         }
-        .st-line-bg.has-bg { border-style: solid; border-color: rgba(99,214,196,.45); }
-        .st-line-bg.is-over { border-style: solid; border-color: #63d6c4; box-shadow: 0 0 0 2px rgba(99,214,196,.3); }
-        .st-line-bg-clear {
-            display: none; position: absolute; right: -5px; top: -6px;
-            width: 14px; height: 14px; padding: 0; cursor: pointer; line-height: 12px;
-            font-size: 10px; color: #dceae7; background: #163038;
-            border: 1px solid rgba(226,164,95,.5); border-radius: 50%;
-        }
-        .st-line:hover .st-line-bg.has-bg .st-line-bg-clear,
-        .st-line.is-sel .st-line-bg.has-bg .st-line-bg-clear { display: block; }
-        .st-line-bg-clear:hover { color: #07141a; background: #e2a45f; }
+        .st-line-bg:not(.has-bg) { visibility: hidden; }
         .st-line-ops { flex: none; display: flex; gap: 3px; opacity: 0; transition: opacity .12s; }
         .st-line:hover .st-line-ops, .st-line.is-sel .st-line-ops { opacity: 1; }
         .st-line-ops button {
@@ -693,27 +985,42 @@
             font: 500 10px/1.2 ui-monospace, Consolas, monospace; color: var(--text-1);
             background: rgba(4,12,17,.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        /* BGM 曲目清单：拖到剧本行右侧竖轨即落一段 */
+        /* 音频卡片图库：BGM / 声效都做成和背景图库一样的缩略大卡，方便看清文件名、拖到轨道 */
         .st-bgm-field { margin-top: 12px; }
         .st-bgm-field > span { display: block; margin-bottom: 5px; font-size: 11px; color: rgba(230,241,239,.6); }
-        .st-bgm-picker {
-            display: flex; flex-direction: column; gap: 3px; max-height: 132px; overflow-y: auto;
-            padding: 4px; background: rgba(0,0,0,.2);
-            border: 1px solid rgba(226,164,95,.25); border-radius: 4px;
+        .st-bgm-picker, .st-sfx-picker {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 5px;
+            max-height: 168px; overflow-y: auto; padding: 5px;
+            background: rgba(0,0,0,.2); border: 1px solid var(--hairline); border-radius: var(--radius-sm);
         }
-        .st-bgm-picker::-webkit-scrollbar { width: 5px; }
+        .st-bgm-picker { border-color: rgba(226,164,95,.25); }
+        .st-sfx-picker { border-color: rgba(189,167,236,.28); }
+        .st-bgm-picker::-webkit-scrollbar, .st-sfx-picker::-webkit-scrollbar { width: 6px; }
         .st-bgm-picker::-webkit-scrollbar-thumb { background: rgba(226,164,95,.35); border-radius: 3px; }
-        .st-bgm-file {
-            display: flex; align-items: center; gap: 6px; padding: 4px 6px; cursor: grab;
-            font-size: 11px; color: #e8d6bd; background: rgba(226,164,95,.07);
-            border: 1px solid rgba(226,164,95,.2); border-radius: 3px;
+        .st-sfx-picker::-webkit-scrollbar-thumb { background: rgba(189,167,236,.35); border-radius: 3px; }
+        .st-bgm-file, .st-sfx-file-card, .st-voice-file-card {
+            position: relative; aspect-ratio: 16 / 9; cursor: grab; overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid rgba(226,164,95,.3); border-radius: var(--radius-sm);
+            background: radial-gradient(circle at 30% 25%, rgba(226,164,95,.28), transparent 65%),
+                        repeating-linear-gradient(0deg, rgba(226,164,95,.1) 0 2px, transparent 2px 6px),
+                        #16221f;
         }
-        .st-bgm-file:hover { background: rgba(226,164,95,.16); border-color: rgba(226,164,95,.5); }
-        .st-bgm-file:active { cursor: grabbing; }
-        .st-bgm-file-ico { flex: none; color: #e2a45f; font-size: 13px; }
+        .st-sfx-file-card, .st-voice-file-card {
+            border-color: rgba(189,167,236,.35);
+            background: radial-gradient(circle at 30% 25%, rgba(189,167,236,.3), transparent 65%),
+                        repeating-linear-gradient(0deg, rgba(189,167,236,.1) 0 2px, transparent 2px 6px),
+                        #1a1726;
+        }
+        .st-bgm-file:hover, .st-sfx-file-card:hover, .st-voice-file-card:hover { filter: brightness(1.3); border-color: var(--accent); }
+        .st-bgm-file:active, .st-sfx-file-card:active, .st-voice-file-card:active { cursor: grabbing; }
+        .st-bgm-file-ico { flex: none; color: #ffd9a8; font-size: 24px; line-height: 1; opacity: .9; }
+        .st-sfx-file-card .st-bgm-file-ico, .st-voice-file-card .st-bgm-file-ico { color: #d9c9f7; }
         .st-bgm-file-name {
-            min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-            font: 500 var(--fs-md)/1.2 ui-monospace, Consolas, monospace;
+            position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 4px;
+            text-align: center; color: var(--text-1); background: rgba(4,12,17,.86);
+            font: 500 10px/1.2 ui-monospace, Consolas, monospace;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .st-bgm-empty { padding: 10px 6px; font-size: var(--fs-md); color: var(--text-3); text-align: center; }
         /* 点竖轨上的段才出现：试听 / 删除 / 覆盖句（如 1–3） */
@@ -730,13 +1037,7 @@
             font: 500 10px/1.3 ui-monospace, Consolas, monospace; color: rgba(232,214,189,.8);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 7px;
         }
-        .st-bgm-detail-range { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(230,241,239,.6); }
-        .st-bgm-detail-range input {
-            width: 56px; padding: 4px 6px; text-align: center;
-            background: rgba(0,0,0,.35); color: #dceae7; font-family: inherit; font-size: 11px;
-            border: 1px solid rgba(226,164,95,.3); border-radius: 3px;
-        }
-        .st-bgm-detail-range input:focus { outline: none; border-color: #e2a45f; }
+        .st-bgm-detail-hint { margin-top: 6px; font-size: 10px; line-height: 1.4; }
         .st-bgm-fades { display: flex; gap: 6px; margin-top: 7px; }
         .st-bgm-fades button {
             flex: 1; padding: 4px 4px; cursor: pointer; font-size: 11px; font-family: inherit;
@@ -745,14 +1046,6 @@
         }
         .st-bgm-fades button:hover { border-color: #e2a45f; color: #ffd9a8; }
         .st-bgm-fades button.is-on { color: #07141a; background: #e2a45f; border-color: #e2a45f; }
-        .st-bgm-detail-ops { display: flex; gap: 6px; margin-top: 8px; }
-        .st-bgm-detail-ops button {
-            flex: 1; padding: 5px 4px; cursor: pointer; font-size: 11px; font-family: inherit;
-            color: #e8d6bd; background: transparent; border: 1px solid rgba(226,164,95,.4); border-radius: 3px;
-        }
-        .st-bgm-detail-ops button:hover { color: #07141a; background: #e2a45f; border-color: #e2a45f; }
-        .st-bgm-detail-ops button.is-playing { color: #07141a; background: #e2a45f; border-color: #e2a45f; }
-        #st-bgm-del:hover { color: #fff; background: #b45a4a; border-color: #b45a4a; }
         .st-inline { display: flex; gap: 6px; }
         .st-inline input { flex: 1; min-width: 0; }
         .st-inline button {
@@ -942,8 +1235,15 @@
         }
         .st-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
         .st-view[hidden] { display: none; }
-        /* 角色表页把右栏让出来，三栏才铺得开；「＋ 新增行」只属于剧本页 */
-        #st-editor[data-tab="cast"] .st-col--props { display: none; }
+        /* 角色表页把预览与右栏让出来，三栏才铺得开；「＋ 新增行」只属于剧本页 */
+        #st-editor[data-tab="cast"] .st-col--props,
+        #st-editor[data-tab="cast"] #wb-inspector,
+        #st-editor[data-tab="cast"] .wb-split[data-split="inspector"] { display: none; }
+        #st-editor[data-tab="cast"] .wb-body { grid-template-columns: var(--nav-w) 6px minmax(0,1fr); }
+        #st-editor[data-tab="cast"] .wb-center { grid-template-rows: minmax(0,1fr); }
+        /* 角色表页：整块「台词 + 预览」顶区都让出来，只留三列角色表 */
+        #st-editor[data-tab="cast"] .wb-top,
+        #st-editor[data-tab="cast"] .wb-split[data-split="preview"] { display: none; }
         #st-editor[data-tab="cast"] #st-add-line { display: none; }
 
         .st-cast-body { flex: 1; min-height: 0; display: flex; gap: 10px; }
@@ -952,9 +1252,11 @@
             background: rgba(0,0,0,.22); border: 1px solid rgba(99,214,196,.14);
             border-radius: 6px; padding: 8px;
         }
-        .st-cast-col-roles { flex: 0 0 190px; }
-        .st-cast-col-acts  { flex: 0 0 282px; }
+        /* 三列宽度由 CSS 变量驱动，列间分割条可拖动 */
+        .st-cast-col-roles { flex: 0 0 var(--cast-roles-w, 190px); }
+        .st-cast-col-acts  { flex: 0 0 var(--cast-acts-w, 282px); }
         .st-cast-col-fields { flex: 1; min-width: 0; }
+        .wb-split--cast { margin: 0; }
         .st-cast-col-head {
             display: flex; align-items: center; justify-content: space-between;
             gap: 6px; margin-bottom: 7px; padding-bottom: 6px;
@@ -1111,3 +1413,179 @@
         .st-load-kicker { font: 500 10px/1.6 ui-monospace, Consolas, monospace; letter-spacing: .3em; color: #63d6c4; }
         #st-status { font-size: 13px; color: #dceae7; }
         #st-status:empty { display: none; }
+
+        /* ============================================================
+           工作台扩展：横向多轨时间轴 / 声效 / 搜索高亮
+           纯编辑态视觉，不引用播放态任何坐标。
+           ============================================================ */
+        .wb-tl { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0;
+                 background: var(--surface-1); border: 1px solid var(--hairline);
+                 border-radius: var(--radius); overflow: hidden; }
+        .wb-tl-toolbar {
+            display: flex; align-items: center; gap: 6px; flex: none; height: 38px; padding: 0 10px;
+            background: var(--surface-3); border-bottom: 1px solid var(--hairline);
+        }
+        .wb-tl-title { font-size: var(--fs-md); color: var(--accent); margin-right: 6px; }
+        .wb-tl-toolbar button {
+            min-width: 26px; height: 23px; padding: 0 8px; cursor: pointer; font-family: inherit; font-size: var(--fs-sm);
+            color: var(--text-2); background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+        }
+        .wb-tl-toolbar button:hover { color: var(--accent); border-color: var(--accent-line); }
+        #wb-tl-zoom-label { font: 500 var(--fs-sm)/1 ui-monospace, Consolas, monospace; color: var(--text-3); min-width: 40px; text-align: center; }
+        .wb-tl-tip { margin-left: auto; font-size: var(--fs-xs); color: var(--text-4); }
+        .wb-tl-tip kbd {
+            font: 500 var(--fs-xs)/1 ui-monospace, monospace; padding: 1px 4px; border-radius: 3px;
+            color: var(--amber); background: var(--amber-soft); border: 1px solid var(--amber-line);
+        }
+
+        /* 滚动容器：横向平移（底部滚动条）+ 纵向滚轨道（右侧滚动条），两条原生滚动条 */
+        .wb-tl-scroll { flex: 1; min-height: 0; overflow: scroll; position: relative; --tl-tick: 96px; }
+        /* 两条滚动条常驻可见（截图里用户找不到滚动条）：横＝左右移动时间轴，竖＝上下滚轨道 */
+        .wb-tl-scroll { scrollbar-width: auto; scrollbar-color: rgba(255,207,74,.55) #0a1a1f; }
+        .wb-tl-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
+        .wb-tl-scroll::-webkit-scrollbar-track { background: #0a1a1f; border: 1px solid var(--hairline); }
+        .wb-tl-scroll::-webkit-scrollbar-thumb {
+            background: rgba(255,207,74,.5); border-radius: 6px; border: 2px solid #0a1a1f;
+        }
+        .wb-tl-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,207,74,.78); }
+        .wb-tl-scroll::-webkit-scrollbar-corner { background: #0a1a1f; }
+        .wb-tl-inner { position: relative; min-height: 100%; }
+        .wb-tl-ruler {
+            position: sticky; top: 0; z-index: 5; display: flex; height: 26px;
+            background: var(--surface-2); border-bottom: 1px solid var(--hairline);
+        }
+        .wb-tl-ruler-label {
+            position: sticky; left: 0; z-index: 6; flex: none; width: 104px; height: 26px;
+            display: flex; align-items: center; padding-left: 10px;
+            font: 500 var(--fs-xs)/1 ui-monospace, monospace; color: var(--text-4);
+            background: var(--surface-2); border-right: 1px solid var(--hairline);
+        }
+        .wb-tl-ruler-track { display: flex; flex: none; }
+        .wb-tl-tick {
+            flex: none; width: var(--tl-tick); height: 26px; box-sizing: border-box;
+            display: flex; align-items: center; justify-content: center;
+            font: 500 var(--fs-xs)/1 ui-monospace, monospace; color: var(--text-3);
+            border-right: 1px solid var(--hairline);
+        }
+        .wb-tl-tick.is-sel { color: var(--accent); background: var(--accent-soft); }
+        .wb-tl-lanes { position: absolute; top: 26px; left: 0; z-index: 4; width: 104px; }
+        .wb-tl-lane-label {
+            display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box;
+            font-size: var(--fs-sm); color: var(--text-2); background: var(--surface-1);
+            border-right: 1px solid var(--hairline); border-bottom: 1px solid rgba(99,214,196,.1);
+        }
+        .wb-tl-lane-label { cursor: grab; }
+        .wb-tl-lane-label:active { cursor: grabbing; }
+        .wb-tl-lane-label.is-drag, .wb-tl-cell.is-drag { opacity: .4; }
+        .wb-tl-lane-dot { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+        .wb-tl-cells { position: absolute; top: 26px; left: 104px; }
+        .wb-tl-lane { position: relative; height: 38px; border-bottom: 1px solid rgba(99,214,196,.08); }
+        .wb-tl-lane.is-drop { background: rgba(99,214,196,.12); outline: 1px dashed var(--accent); outline-offset: -1px; }
+        .wb-tl-gridline { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(99,214,196,.09); }
+        .wb-tl-cell {
+            position: absolute; top: 3px; height: 32px; box-sizing: border-box;
+            display: flex; align-items: center; gap: 4px; padding: 0 6px; overflow: hidden;
+            border-radius: 4px; border: 1px solid var(--hairline); background: var(--accent-soft);
+            font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; cursor: pointer;
+        }
+        .wb-tl-cell:hover { filter: brightness(1.25); }
+        .wb-tl-cell--text, .wb-tl-cell--stage, .wb-tl-cell--sfx, .wb-tl-cell--voice,
+        .wb-tl-cell--bg, .wb-tl-cell--bgm { cursor: grab; }
+        .wb-tl-cell--text:active, .wb-tl-cell--stage:active, .wb-tl-cell--sfx:active,
+        .wb-tl-cell--voice:active, .wb-tl-cell--bg:active, .wb-tl-cell--bgm:active { cursor: grabbing; }
+        .wb-tl-cell.is-sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-line); }
+        /* 选中的演出段：高亮边框，提示 Backspace 可删除 */
+        .wb-tl-cell--seg { cursor: pointer; }
+        .wb-tl-cell.is-seg-sel {
+            border-color: #fff !important; box-shadow: 0 0 0 1px #fff, 0 0 8px rgba(255,255,255,.35);
+            filter: brightness(1.3); z-index: 3;
+        }
+        .wb-tl-cell--text { background: rgba(99,214,196,.12); color: var(--text-1); font-size: var(--fs-sm); }
+        .wb-tl-cell--bg { background: rgba(143,211,232,.14); border-color: rgba(143,211,232,.4); color: #bfe6f2; }
+        .wb-tl-cell--bgm { background: rgba(226,164,95,.16); border-color: var(--amber-line); color: #ffd9a8; }
+        .wb-tl-cell--sfx { background: rgba(189,167,236,.18); border-color: rgba(189,167,236,.55); color: #d9c9f7; }
+        .wb-tl-cell--stage { background: rgba(99,214,196,.1); color: var(--accent); }
+        .wb-tl-cell--voice { background: rgba(233,185,110,.14); border-color: rgba(233,185,110,.42); color: #f0d5a4; }
+        .wb-tl-cell--cam, .wb-tl-cell--fx { background: rgba(255,255,255,.05); color: var(--text-4); border-style: dashed; }
+        .wb-tl-cell-name { overflow: hidden; text-overflow: ellipsis; }
+        .wb-tl-cell-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: currentColor; opacity: .7; }
+        /* 段长手柄：背景/BGM/声效/语音/立绘段用左右边缘拖长度 */
+        .wb-tl-handle {
+            position: absolute; top: 0; bottom: 0; width: 8px; z-index: 2; cursor: ew-resize;
+        }
+        .wb-tl-handle--l { left: 0; }
+        .wb-tl-handle--r { right: 0; }
+        .wb-tl-handle::after {
+            content: ''; position: absolute; top: 50%; left: 50%; width: 2px; height: 12px;
+            background: currentColor; opacity: 0; transform: translate(-50%,-50%); border-radius: 1px;
+        }
+        .wb-tl-cell:hover .wb-tl-handle::after { opacity: .75; }
+        .wb-tl-cell.is-resizing { filter: brightness(1.3); box-shadow: 0 0 0 1px var(--accent); z-index: 5; }
+        /* 跟手拖动（桌面 app / Vegas 手感）：抓起的行抬高半透明，落点段描边提示松手交换 */
+        .wb-tl-cell.is-dragging {
+            z-index: 8; opacity: .85; cursor: grabbing; filter: brightness(1.2);
+            box-shadow: 0 6px 18px rgba(0,0,0,.55), 0 0 0 1px var(--accent);
+        }
+        .wb-tl-cell.is-swap-target {
+            outline: 2px solid #ffcf4a; outline-offset: -2px;
+            box-shadow: inset 0 0 12px rgba(255,207,74,.25);
+        }
+        /* 拖动未松手时的预渲染：被交换/补偿的块虚影落到新位置，
+           半透明 + 虚线边表示「预览，尚未写入」。松手后由真实重绘替换。 */
+        .wb-tl-cell.is-preview {
+            opacity: .38; outline: 1px dashed var(--accent); outline-offset: -2px;
+            filter: saturate(.6); z-index: 2;
+        }
+        /* 框选：空白区拖出的选框 + 被框住滑块的描边（跨所有轨道生效） */
+        .wb-tl-cell.is-multi-sel {
+            outline: 1px solid #fff; outline-offset: -1px;
+            box-shadow: 0 0 0 2px var(--accent), 0 0 10px rgba(99,214,196,.5);
+            z-index: 4; filter: brightness(1.2);
+        }
+        .wb-tl-band {
+            position: absolute; z-index: 9; pointer-events: none;
+            border: 1px solid var(--accent); background: rgba(99,214,196,.14);
+            box-shadow: inset 0 0 12px rgba(99,214,196,.18);
+        }
+        .wb-tl-playhead {
+            position: absolute; top: 26px; bottom: 0; width: 2px; z-index: 3;
+            background: #ffcf4a; box-shadow: 0 0 8px rgba(255,207,74,.85); pointer-events: none;
+        }
+        .wb-tl-playhead::before {
+            content: ''; position: absolute; top: -4px; left: -4px; width: 10px; height: 10px;
+            background: #ffcf4a; clip-path: polygon(0 0, 100% 0, 50% 100%);
+        }
+        .wb-tl-empty { padding: 20px; font-size: var(--fs-md); color: var(--text-4); }
+
+        /* 搜索命中高亮：剧本行文字里的 <mark> */
+        .st-line-text mark, .st-line-role mark {
+            background: rgba(233,185,110,.34); color: #ffe0b0; border-radius: 2px; padding: 0 1px;
+        }
+        .st-line.is-hit { background: rgba(233,185,110,.1); border-color: rgba(233,185,110,.35); }
+
+        /* 声效清单 */
+        .st-sfx-field { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--hairline); }
+        .st-sfx-field > span { display: block; margin-bottom: 6px; font-size: var(--fs-md); color: var(--text-2); }
+        .st-sfx-list { display: flex; flex-direction: column; gap: 4px; max-height: 130px; overflow-y: auto; }
+        .st-sfx-row {
+            display: flex; align-items: center; gap: 5px; padding: 5px 6px; box-sizing: border-box;
+            background: rgba(189,167,236,.08); border: 1px solid rgba(189,167,236,.25); border-radius: var(--radius-sm);
+            font-size: var(--fs-sm); color: #d9c9f7;
+        }
+        .st-sfx-at { flex: none; font: 600 var(--fs-xs)/1 ui-monospace, monospace; color: var(--violet); min-width: 34px; }
+        .st-sfx-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .st-sfx-row button {
+            flex: none; width: 20px; height: 20px; cursor: pointer; font-size: 12px; line-height: 1;
+            color: #d9c9f7; background: transparent; border: 1px solid transparent; border-radius: 3px;
+        }
+        .st-sfx-row button:hover { background: rgba(217,104,90,.3); color: #ffb3ab; }
+        .st-sfx-empty { font-size: var(--fs-xs); color: var(--text-4); padding: 4px 0; }
+
+        /* 浮动预览：脱离布局，右上角固定小窗 */
+        #wb-preview.is-float {
+            position: fixed; top: 60px; right: 20px; z-index: 50;
+            width: 480px; height: 300px; padding: 8px;
+            background: var(--surface-1); border: 1px solid var(--accent-line);
+            border-radius: var(--radius); box-shadow: 0 12px 40px rgba(0,0,0,.6);
+        }
+        #wb-preview.is-float .wb-preview-viewport { flex: 1; }

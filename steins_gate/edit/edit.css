@@ -1,0 +1,102 @@
+/* ============================================================
+   edit.css — 独立编辑页（steins_gate/edit/index.html）专属样式。
+
+   编辑页通过 <base href="../story/"> 复用 story.css 的播放层与
+   工作台骨架；凡是只属于编辑页的覆盖/新增样式，一律写在本文件，
+   不要再往 story.css 里加 html[data-editor="1"] 规则——那是两个
+   页面的耦合点，编辑页的改动应当收敛在这里。
+
+   加载顺序：story.css → edit.css（同名选择器后者覆盖）。
+   ============================================================ */
+
+/* ---- 从 story.css 迁来的编辑页专属覆盖 ----
+   原来是 story.css 里的 html[data-editor="1"] ... 规则。edit.css 只在编辑页加载，
+   不需要属性前缀，story 页不再承载这些覆盖（消除两页样式耦合）。 */
+#st-bar { display: none !important; }
+#st-editor { top: 0; }
+#st-full-exit { display: none !important; }
+
+/* ---- 载入动画（含逐角色「加入角色…」提示）只盖在实时预览窗口内 ----
+   #st-loading 在本页 DOM 里位于 .wb-preview-viewport 内（position:relative），
+   故 absolute + inset:0 即贴合预览画面，不遮整个工作台。 */
+#st-loading {
+    position: absolute; inset: 0; z-index: 3; gap: 8px;
+    background: rgba(4, 10, 14, .9); border-radius: var(--radius);
+}
+.st-load-kicker { font-size: 9px; letter-spacing: .22em; }
+#st-status { font-size: 11px; }
+
+/* ---- 实时预览独占顶部整行；台词模块已移到右栏「本行演出」 ----
+   预览/时间轴拼成一整块面板：清零 story.css 默认留的 8px 外边距与圆角，
+   让面板边框直接顶到中栏四边，不在 surface-0 底上露出深色缝
+   （即截图红框里上/下/左/右那几道缝）。中间的 6px split 保留，
+   仍用于拖动调整预览高度。 */
+.wb-preview {
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none; overflow: hidden;
+}
+
+/* 台词模块：作为「本行演出」第一项，占满右栏宽度。
+   右栏默认只有 ~274px，story.css 给 .wb-linebar-people 的两列 grid
+   会把「说话者」和「显示名 + 输入框 + 两个按钮」挤到互相压字；
+   编辑页里改成两行堆叠，窄栏下也不重叠。 */
+.wb-linebar {
+    width: 100%; min-width: 0; max-width: none;
+    margin: 0 0 12px; padding: 7px 8px 8px;
+    background: var(--surface-2); border-radius: var(--radius-sm); box-shadow: none;
+}
+.wb-linebar-people { display: flex; flex-direction: column; gap: 6px; }
+.wb-linebar-people .st-field--inline { width: 100%; }
+/* .st-inline 本身是 <span>，story.css 的 .st-field--inline>span 曾把它压成 14px
+   并 overflow:hidden，导致里面的输入框/按钮显示不全；这里恢复成正常控件容器。 */
+.wb-linebar .st-inline { height: auto; line-height: normal; overflow: visible; flex-wrap: wrap; }
+.wb-linebar-people .st-inline input { flex: 1 1 80px; min-width: 60px; }
+/* select/input 用固定 26px + 上下 2px padding 时，文字行高会超出内容盒 4px 被裁；
+   改为 padding 归零、行高撑开，高度 28px 与按钮齐平。 */
+.wb-linebar select, .wb-linebar input, .wb-linebar .st-inline button {
+    height: 28px; padding-top: 0; padding-bottom: 0; line-height: 24px;
+}
+.wb-linebar .st-inline button.st-quiet { white-space: nowrap; }
+
+/* 登台角色：标题独占一行；淡入淡出与「添加角色」窄栏里不再重叠。
+   窄栏时输入框组保底宽度，按钮自动换行；文字超长省略，绝不压到按钮上。 */
+.st-sub { justify-content: flex-start; margin-bottom: 6px; }
+.st-stage-ops {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px 8px;
+    flex-wrap: wrap; margin: 0 0 10px;
+}
+.st-fade-field {
+    flex: 1 1 auto; min-width: 150px;
+    overflow: hidden; text-overflow: ellipsis;
+}
+#st-stage-add { white-space: nowrap; }
+
+/* 剧本行列表：禁止横向滚动。
+   窄栏下台词行内的槽位/操作按钮会把 ol 撑宽，容器于是冒出一条灰色水平
+   滚动条 thumb（截图里那条多余的长条）。行文本自身已有 ellipsis，隐藏
+   横向滚动不影响阅读。 */
+.st-lines-wrap { overflow-x: hidden; }
+
+/* 时间轴与工作区齐平：清零左右/底部内边距与圆角，四边贴满中栏不留缝 */
+.wb-tl { border-radius: 0; }
+.wb-work { padding: 0; }
+
+/* ---- 左栏大纲统一：项目 → 标题 / 背景 / 背景音乐 / 声效 / 改动历史 ----
+   剧本下拉归入「项目」本身，不再单列一级；四个场景字段的标签复用
+   .wb-nav-group-title，与「改动历史」的分组标题同款。
+   这里显式覆盖 story.css 的 .st-field > span 普通字段标签样式。 */
+.wb-nav-scene-group { margin: 2px 0 8px; }
+.wb-nav-scene-props .st-field > span.wb-nav-group-title,
+.wb-nav-scene-props .st-bgm-field > span.wb-nav-group-title,
+.wb-nav-scene-props .st-sfx-field > span.wb-nav-group-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 5px;
+    padding: 0 4px 5px;
+    font-size: var(--fs-xs);
+    letter-spacing: .08em;
+    color: var(--text-4);
+    border-bottom: 1px solid var(--hairline);
+}

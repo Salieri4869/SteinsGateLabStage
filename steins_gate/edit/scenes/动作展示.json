@@ -1,0 +1,138 @@
+{
+  "doc": "动作与淡化效果展示剧本。密集切换表情（主时间线交叉淡化）+ 仕草叠在差分槽 + 双人同时演出 cues + 走位 + 上下场 + 背景切换。所有 action 都是 cast.json 里已验证存在的宏名，不引入模型里没有的时间线。用 ?scene=动作展示.json 打开。",
+  "title": "灵动演出测试 · 未来道具研究所",
+  "background": "background.jpg",
+  "fadeMs": 300,
+  "bgm": [],
+  "stage": [
+    {
+      "role": "铃羽",
+      "x": -0.42,
+      "y": -0.02,
+      "scale": 1.45,
+      "z": 1
+    },
+    {
+      "role": "红莉栖",
+      "x": 0.4,
+      "y": 0,
+      "scale": 1.45,
+      "z": 2
+    }
+  ],
+  "lines": [
+    {
+      "role": "铃羽",
+      "text": "红莉栖——！我终于找到你了！",
+      "action": "开心",
+      "voice": "resg06_16_suz0012.xwma.opus",
+      "enter": [
+        "铃羽"
+      ]
+    },
+    {
+      "role": "红莉栖",
+      "text": "",
+      "action": "困扰",
+      "voice": "resg00_01_krs0005.xwma.opus",
+      "cues": {
+        "铃羽": {
+          "action": "点头"
+        }
+      }
+    },
+    {
+      "role": "铃羽",
+      "text": "别板着脸嘛。你看这个——",
+      "action": "微笑",
+      "voice": "resg06_16_suz0016.xwma.opus"
+    },
+    {
+      "role": "红莉栖",
+      "text": "哇！这、这是从哪翻出来的？",
+      "action": "测试",
+      "voice": "resg06_16_krs0006.xwma.opus",
+      "cues": {
+        "铃羽": {
+          "action": "害羞"
+        }
+      }
+    },
+    {
+      "role": "铃羽",
+      "text": "研究所地下室的旧终端，我顺手拆的。",
+      "action": "认真",
+      "voice": "resg06_16_suz0017.xwma.opus"
+    },
+    {
+      "role": "红莉栖",
+      "text": "那些是机密资料，乱碰会出大事的！",
+      "action": "惊讶",
+      "voice": "resg01_04_krs0011.xwma.opus",
+      "cues": {
+        "铃羽": {
+          "action": "困扰"
+        }
+      }
+    },
+    {
+      "role": "铃羽",
+      "text": "诶——我又没弄坏。",
+      "action": "生气",
+      "voice": "resg06_16_suz0012.xwma.opus"
+    },
+    {
+      "role": "红莉栖",
+      "text": "……真是拿你没办法。",
+      "action": "困扰",
+      "voice": "resg11_08_krs0009.xwma.opus",
+      "move": {
+        "铃羽": -0.32
+      }
+    },
+    {
+      "role": "铃羽",
+      "text": "好啦好啦，我错了还不行吗。",
+      "action": "叹气",
+      "voice": "resg06_16_suz0016.xwma.opus",
+      "move": {
+        "铃羽": {
+          "x": -0.42,
+          "y": -0.05
+        }
+      }
+    },
+    {
+      "role": "红莉栖",
+      "text": "算了，过来吧。给你看个有意思的东西。",
+      "action": "微笑",
+      "voice": "resg11_08_krs0010.xwma.opus",
+      "background": "ev_n001b.png",
+      "cues": {
+        "铃羽": {
+          "action": "开心"
+        }
+      }
+    },
+    {
+      "role": "铃羽",
+      "text": "哦哦！这是什么装置？",
+      "action": "惊讶",
+      "voice": "resg06_16_suz0017.xwma.opus",
+      "cues": {
+        "红莉栖": {
+          "action": "微笑"
+        }
+      }
+    },
+    {
+      "role": "红莉栖",
+      "text": "时间机器——的雏形。不过还差得远呢。",
+      "action": "害羞",
+      "voice": "resg10_11k_krs0000.xwma.opus",
+      "exit": [
+        "铃羽"
+      ]
+    }
+  ]
+}

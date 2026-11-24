@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-mode="edit" data-editor="1">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>编辑模式 · Amadeus Demo</title>
+    <!-- 编辑页与剧情页共享 story.js / story.css / ui/* 与 SDK，base 把相对路径锚到 story/。
+         本页是独立文档，另起一台 wasm device，与剧情页内存互不干扰。 -->
+    <base href="../story/">
+    <!-- 先加载剧情页共享的播放层/工作台骨架，再叠加编辑页专属样式 -->
+    <link rel="stylesheet" href="story.css">
+    <link rel="stylesheet" href="../edit/edit.css">
+
+    <!-- 加载顺序是 SDK 硬契约，与 steins_gate/index.html 保持一致 -->
+    <script src="../../common/gl_arm_pose.js"></script>
+    <script src="../../common/emote_config.js"></script>
+    <script src="../../driver/emotedriver.js" charset="UTF-8"></script>
+    <script src="../../driver/emoteplayer.js" charset="UTF-8"></script>
+    <script src="../../libs/fflate.js"></script>
+    <script src="../../common/model_loader.js"></script>
+    <script src="../../common/variable_transition.js"></script>
+    <script src="../../common/lipsync.js"></script>
+    <script src="../../common/config_validator.js"></script>
+    <script src="../../common/action_config.js"></script>
+    <script src="../../common/emote_core.js"></script>
+    <script src="ui/sg-dialog.js"></script>
+    <!-- 时间轴纯算法（无 DOM）：story.js 与 edit.js 共用，先于两者加载 -->
+    <script src="../edit/timeline-core.js"></script>
+    <script src="story.js"></script>
+    <script src="../edit/edit.js"></script>
+</head>
+<body onload="EmoteDriver_Launch(startStory)">
+    <!-- ============================================================
+         播放态层：背景交叉淡化 / 全屏画布 / 对话框 HUD。
+         这一层是逐帧还原原作的核心资产，布局重构完全不碰。
+         ============================================================ -->
+    <div id="st-bg-layers" aria-hidden="true">
+        <div class="st-bg-layer is-on" id="st-bg-0"></div>
+        <div class="st-bg-layer" id="st-bg-1"></div>
+    </div>
+
+    <!-- 载入动画（含逐角色「加入角色」提示）只盖在实时预览窗口上，不遮整个工作台；
+         #st-status 仍供 startStory 写入，ID 不变。 -->
+
+    <header id="st-bar">
+        <a class="st-home" href="../../index.html" title="返回主页">← 主页</a>
+        <span class="st-brand">EDITOR</span>
+        <div class="st-scene-picker" id="st-scene-picker">
+            <button type="button" class="st-scene-trigger" id="st-scene-trigger"
+                    aria-haspopup="listbox" aria-expanded="false" aria-label="选择场景">
+                <span class="st-scene-label" id="st-scene-label"></span>
+                <span class="st-scene-caret" aria-hidden="true"></span>
+            </button>
+            <div class="st-scene-menu" id="st-scene-menu" role="listbox" hidden></div>
+            <select id="st-scene" aria-label="场景" hidden></select>
+        </div>
+        <span id="st-msg"></span>
+        <span class="st-spacer"></span>
+        <!-- initLive 需要 st-live-toggle 存在；编辑页用不到即时台词，隐藏即可 -->
+        <button type="button" id="st-live-toggle" hidden aria-hidden="true" tabindex="-1"></button>
+        <a class="st-goto-play" id="st-goto-play" href="index.html" title="前往剧情模式预览当前场景（独立页面，与编辑内存隔离）">▶ 剧情预览</a>
+        <button type="button" id="st-full" title="全屏：隐藏浏览器边框与顶栏，只留画面">全屏</button>
+    </header>
+
+    <button type="button" id="st-full-exit" title="退出全屏（Esc）">全屏中 · Esc</button>
+
+    <canvas id="canvas"></canvas>
+
+    <!-- 对话框：MSGWIN 底色 / 电路线闪层 / 名牌装饰线 + 名牌底板 + 白闪层
+         坐标全部照抄游戏（1920×1080），缩放交给 #st-hud 的 transform -->
+    <div id="st-hud">
+        <div class="hud-ly hud-win" data-hud="win"><img src="ui/msgwin_2_grad.webp" alt=""></div>
+        <div class="hud-ly hud-dark" data-hud="dark"><img src="ui/msgwin_3_dark.webp" alt=""></div>
+        <div class="hud-ly hud-dim" data-hud="dim"><img src="ui/msgwin_4_dim.webp" alt=""></div>
+        <div class="hud-ly hud-mid" data-hud="mid"><img src="ui/msgwin_5_mid.webp" alt=""></div>
+        <div class="hud-ly hud-lines" data-hud="lines"><img src="ui/msgwin_1_lines.webp" alt=""></div>
+        <div class="hud-ly hud-deco" data-hud="deco"></div>
+        <div class="hud-ly hud-name-w" data-hud="name-white"></div>
+        <div class="hud-ly hud-name" data-hud="name"></div>
+        <div class="hud-ly hud-name-morph" data-hud="name-morph"></div>
+        <div id="st-name"></div>
+        <div id="st-text"><span id="st-text-txt"></span><span id="st-gear" class="is-off" aria-hidden="true"></span></div>
+        <span id="st-hint"></span>
+        <div id="st-caret" class="is-off"></div>
+        <div id="st-autoslot" aria-hidden="true">
+            <div id="st-autoplate">
+                <img class="ap-base" src="ui/auto_base.webp" alt="">
+                <img class="ap-text" src="ui/auto_text.webp" alt="">
+            </div>
+        </div>
+        <button type="button" id="st-auto" aria-pressed="false"
+                title="AUTO：等这句的语音放完自动翻页；点击画面可立即继续">
+            <img id="st-auto-img" src="ui/auto_off.webp" alt="AUTO">
+        </button>
+    </div>
+
+    <!-- 即时台词：不依赖剧本，输入文字 + 音频让当前角色开口 -->
+    <section id="st-live" hidden aria-label="即时台词">
+        <div class="st-live-head">
+            <h2>即时台词 <small>LIVE</small></h2>
+            <button type="button" id="st-live-close" title="关闭">×</button>
+        </div>
+        <label class="st-field"><span>角色</span><select id="st-live-role"></select></label>
+        <label class="st-field"><span>文字（打字机显示，可配合语音）</span><textarea id="st-live-text" rows="3" placeholder="输入台词…"></textarea></label>
+        <label class="st-field"><span>动作（可选）</span><select id="st-live-action"></select></label>
+        <div class="st-live-src">
+            <div class="st-live-src-title">语音来源</div>
+            <div class="st-live-tabs">
+                <button type="button" data-src="file" class="is-active">选择音频</button>
+                <button type="button" data-src="list">音频列表</button>
+                <button type="button" data-src="tts">文字合成</button>
+            </div>
+            <div data-src-pane="file">
+                <div class="st-file-row">
+                    <label class="st-file-btn" for="st-live-file">选择文件</label>
+                    <span id="st-live-file-name" class="st-file-name">未选择文件</span>
+                </div>
+                <input type="file" id="st-live-file" accept="audio/*">
+                <div id="st-live-import-msg" class="st-live-note">音频仅在本地播放，不会上传或保存到服务器。</div>
+            </div>
+            <div data-src-pane="list" hidden>
+                <label class="st-field"><span>文件夹（character/sounds/）</span><select id="st-live-sound-folder"></select></label>
+                <label class="st-field"><span>音频文件</span><select id="st-live-sound-file"></select></label>
+                <div class="st-live-note">播放 character/sounds/ 下已有的音频，不上传、不落盘。</div>
+            </div>
+            <div data-src-pane="tts" hidden>
+                <div class="st-live-note">需服务端配置 TTS 引擎（EMOTE_TTS_BIN）；未配置时会提示改用选择音频。</div>
+            </div>
+        </div>
+        <div class="st-live-ops">
+            <button type="button" id="st-live-say" class="is-primary">开口说话</button>
+            <button type="button" id="st-live-stop">停止</button>
+        </div>
+        <div id="st-live-msg" class="st-live-note"></div>
+    </section>
+
+    <!-- ============================================================
+         编辑态工作台（四区布局）
+         顶栏工具栏 / 左导航 / 中(预览+工作区) / 右检查器 / 底部问题面板
+         所有原有 ID 与 class 钩子原样保留，setTab / 验收脚本不受影响。
+         ============================================================ -->
+    <section id="st-editor" data-tab="script" data-view="script">
+
+        <!-- 工作台顶栏：主页/视图切换/历史/搜索/问题计数/剧情预览/全屏/保存。
+             编辑页不显示独立的 #st-bar，主页与全屏统一收进这一条，风格一致。 -->
+        <div class="wb-toolbar" id="wb-toolbar">
+            <a class="wb-home" href="../../index.html" title="返回主页">← 主页</a>
+            <span class="wb-tool-sep"></span>
+            <div class="st-tabs" id="wb-view-tabs">
+                <button type="button" class="st-tab is-on" data-tab="script" title="纵向剧本列表，专注写台词">剧本</button>
+                <button type="button" class="st-tab" data-tab="timeline" title="横向多轨时间轴，编排演出">时间轴</button>
+                <button type="button" class="st-tab" data-tab="cast" title="角色、动作宏、变量与绑定">角色表</button>
+            </div>
+            <span class="wb-tool-sep"></span>
+            <button type="button" id="wb-undo" class="wb-icon-btn" title="撤销（Ctrl+Z）" disabled>↶</button>
+            <button type="button" id="wb-redo" class="wb-icon-btn" title="重做（Ctrl+Y / Ctrl+Shift+Z）" disabled>↷</button>
+            <span class="wb-tool-sep"></span>
+            <div class="wb-search">
+                <input type="text" id="wb-search-input" autocomplete="off" placeholder="搜索台词 / 角色 / 行号…">
+                <span class="wb-search-count" id="wb-search-count"></span>
+            </div>
+            <span class="wb-spacer"></span>
+            <button type="button" id="wb-issue-badge" class="wb-issue-badge" title="展开问题面板">✓ 0</button>
+            <span class="st-file-name" id="st-json-name"></span>
+            <button type="button" id="st-add-line" title="在选中行后新增一行">＋ 新增行</button>
+            <a class="wb-play" id="wb-goto-play" href="index.html" title="在独立剧情页预览当前场景">▶ 剧情预览</a>
+            <button type="button" class="wb-full" id="wb-full" title="全屏：只留工作台，隐藏剧情背景层">⛶ 全屏</button>
+            <button type="button" id="st-save" disabled title="保存场景（Ctrl+S）">保存</button>
+        </div>
+
+        <!-- 主体三栏 -->
+        <div class="wb-body" id="wb-body">
+
+            <!-- 左：项目导航（剧本下拉 + 场景检查器 + 改动历史） -->
+            <nav class="wb-nav" id="wb-nav" aria-label="项目导航">
+                <div class="wb-nav-head">项目 <button type="button" class="wb-nav-collapse" title="折叠左栏">‹</button></div>
+
+                <!-- 剧本下拉：归入「项目」本身，不再单列一级；删除走后端 DELETE，带二次确认 -->
+                <div class="wb-nav-scene-group">
+                    <div class="wb-scene-bar">
+                        <select id="wb-scene-select" aria-label="选择剧本"></select>
+                        <button type="button" id="wb-scene-new" title="新建剧本">＋</button>
+                        <button type="button" id="wb-scene-del" title="删除当前剧本">－</button>
+                    </div>
+                </div>
+
+                <!-- 场景检查器（标题/背景/BGM/声效），从右栏移入；ID 原样保留，JS 钩子不变 -->
+                <div class="wb-nav-group wb-nav-scene-props" id="wb-scene-props">
+                    <div class="wb-nav-scene-props-inner">
+                        <div class="st-sec">
+                            <h3>场景</h3>
+                            <label class="st-field"><span class="wb-nav-group-title">标题</span><input type="text" id="st-title"></label>
+                            <div class="st-field st-bg-field" id="st-bg-drop">
+                                <span class="wb-nav-group-title">背景 <em class="st-field-note">点图片预览；拖到时间轴背景轨设为本行背景，拖到此处设为场景背景</em></span>
+                                <div class="st-bg-preview" id="st-bg-preview" title="当前场景背景预览"></div>
+                                <div class="st-bg-search-row">
+                                    <input type="text" id="st-bg-search" autocomplete="off" placeholder="搜索背景文件名…">
+                                    <button type="button" id="st-bg-clear" title="清除场景背景（跟随上一场景）">✕</button>
+                                </div>
+                                <div class="st-bg-gallery" id="st-bg-gallery" title="背景图库：单击预览大图；拖到时间轴背景轨＝该行背景，拖到此处＝场景背景（单击只预览）"></div>
+                                <div class="st-bg-empty" id="st-bg-empty" hidden>没有匹配的背景</div>
+                            </div>
+                            <div class="st-bgm-field">
+                                <span class="wb-nav-group-title">背景音乐 <em class="st-field-note">拖音频到右侧竖轨；点段落配置</em></span>
+                                <div class="st-bg-search-row">
+                                    <input type="text" id="st-bgm-search" autocomplete="off" placeholder="搜索背景音乐…">
+                                    <button type="button" id="st-bgm-clear" title="清除搜索词">✕</button>
+                                </div>
+                                <div class="st-bgm-picker" id="st-bgm-picker" title="BGM 清单：拖到剧本行右侧竖轨"></div>
+                                <div class="st-bgm-empty" id="st-bgm-empty" hidden>没有匹配的音乐</div>
+                                <div class="st-bgm-detail" id="st-bgm-detail" hidden>
+                                    <div class="st-bgm-detail-head">
+                                        <span id="st-bgm-detail-title">BGM 段</span>
+                                        <span class="st-field-note" id="st-bgm-detail-note">循环播放</span>
+                                    </div>
+                                    <div class="st-bgm-detail-file" id="st-bgm-detail-file"></div>
+                                    <div class="st-bgm-fades">
+                                        <button type="button" id="st-bgm-fadein" title="开始时音量渐入（约 1 秒）；试听与剧情播放都生效">淡入</button>
+                                        <button type="button" id="st-bgm-fadeout" title="停止或切段时音量渐出（约 1 秒）；试听与剧情播放都生效">淡出</button>
+                                    </div>
+                                    <div class="st-field-note st-bgm-detail-hint">拖动段两端改覆盖句；双击曲目试听</div>
+                                </div>
+                            </div>
+                            <div class="st-sfx-field">
+                                <span class="wb-nav-group-title">声效 <em class="st-field-note">拖到时间轴声效轨／点卡片加到当前句</em></span>
+                                <div class="st-bg-search-row">
+                                    <input type="text" id="st-sfx-search" autocomplete="off" placeholder="搜索声效文件名…">
+                                    <button type="button" id="st-sfx-clear" title="清除搜索词">✕</button>
+                                </div>
+                                <div class="st-sfx-picker" id="st-sfx-picker" title="声效卡片：拖到时间轴声效轨，或点一下加到当前句"></div>
+                                <div class="st-bgm-empty" id="st-sfx-empty" hidden>static/sfx/ 下没有音频</div>
+                                <div class="st-sfx-list" id="st-sfx-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 改动历史：排序放最后 -->
+                <div class="wb-nav-group wb-nav-history">
+                    <div class="wb-nav-group-title">改动历史 <span class="wb-hist-count" id="wb-hist-count"></span></div>
+                    <div class="wb-hist-list" id="wb-hist-list"></div>
+                </div>
+                <div class="wb-nav-foot" id="wb-nav-foot"></div>
+            </nav>
+            <div class="wb-split wb-split--v" data-split="nav" title="拖动调整左栏宽度"></div>
+
+            <!-- 中：预览 + 工作区 -->
+            <div class="wb-center">
+
+                <!-- 实时预览独占顶部整行：画面 + 字幕 + 缩放控件 + 载入动画。
+                     台词模块已移入右栏「本行演出」，排在第一位。 -->
+                <div class="wb-top" id="wb-preview-body">
+                    <section class="wb-preview" id="wb-preview" aria-label="实时预览">
+                        <div class="wb-preview-head">
+                            <span class="wb-preview-title">实时预览 <small id="wb-preview-line-sub">—</small></span>
+                            <div class="wb-preview-ctl">
+                                <button type="button" id="wb-pv-out" title="缩小">−</button>
+                                <button type="button" id="wb-pv-level" title="点击恢复适应">适应</button>
+                                <button type="button" id="wb-pv-in" title="放大">＋</button>
+                                <button type="button" id="wb-pv-fit" title="适应窗口">⤢</button>
+                                <button type="button" id="wb-pv-float" title="浮动预览窗口">浮动</button>
+                            </div>
+                        </div>
+                        <div class="wb-preview-viewport" id="wb-preview-viewport">
+                            <div class="wb-preview-inner" id="wb-preview-inner">
+                                <div class="wb-preview-bg" id="wb-preview-bg"></div>
+                                <canvas class="wb-preview-canvas" id="wb-preview-canvas"></canvas>
+                            </div>
+                            <div class="wb-preview-hint" id="wb-preview-hint">选中剧本行以预览画面</div>
+                            <div class="wb-preview-caption" id="wb-pv-caption" hidden>
+                                <span class="wb-pv-cap-name" id="wb-pv-cap-name"></span>
+                                <span class="wb-pv-cap-text" id="wb-pv-cap-text"></span>
+                            </div>
+                            <div class="wb-preview-grip" id="wb-pv-grip" title="拖动右下角，斜向调整预览与检查器"></div>
+                            <!-- 载入动画（逐角色「加入角色」提示）限定在预览窗口内 -->
+                            <div id="st-loading" role="status" aria-live="polite">
+                                <div class="st-load-kicker">LIVE PREVIEW</div>
+                                <div id="st-status">正在构筑世界线…</div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+                <div class="wb-split wb-split--h" data-split="preview" title="拖动调整预览高度"></div>
+
+                <!-- 工作区：三种视图共用同一份数据 -->
+                <div class="wb-work" id="wb-work">
+
+                    <!-- 视图 1：纵向剧本（原样嵌入，BGM 竖轨与行列表共用滚动容器） -->
+                    <div class="st-view" id="st-view-script">
+                        <div class="st-lines-wrap">
+                            <ol id="st-lines"></ol>
+                            <div class="st-bgm-track" id="st-bgm-track" title="从右侧 BGM 清单拖音频到这里；拖整段平移，拖上下边缘改覆盖句；点段在右侧配置"></div>
+                        </div>
+                    </div>
+
+                    <!-- 视图 2：横向多轨时间轴（新增） -->
+                    <div class="st-view" id="st-view-timeline" hidden>
+                        <div class="wb-tl">
+                            <div class="wb-tl-toolbar">
+                                <span class="wb-tl-title">演出时间轴</span>
+                                <button type="button" id="wb-tl-zoom-out" title="缩小（也可直接滚轮）">−</button>
+                                <span id="wb-tl-zoom-label">100%</span>
+                                <button type="button" id="wb-tl-zoom-in" title="放大（也可直接滚轮）">＋</button>
+                                <button type="button" id="wb-tl-zoom-fit" title="缩放到能看全所有句">适应</button>
+                                <span class="wb-tl-tip">滚轮=缩放 · Shift+滚轮=上下滚 · 拖动=平移 · 选中段按 <kbd>Backspace</kbd> 删除</span>
+                            </div>
+                            <div class="wb-tl-scroll" id="wb-tl-scroll">
+                                <div class="wb-tl-inner" id="wb-tl-inner">
+                                    <div class="wb-tl-ruler" id="wb-tl-ruler"></div>
+                                    <div class="wb-tl-lanes" id="wb-tl-lanes"></div>
+                                    <div class="wb-tl-cells" id="wb-tl-cells"></div>
+                                    <div class="wb-tl-playhead" id="wb-tl-playhead"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 视图 3：角色表（原样嵌入） -->
+                    <div class="st-view" id="st-view-cast" hidden>
+                        <div class="st-cast-body">
+                            <div class="st-cast-col-roles">
+                                <div class="st-cast-col-head">
+                                    <h4>角色</h4>
+                                    <button type="button" id="st-cast-role-add" title="新增角色">＋</button>
+                                </div>
+                                <div id="st-cast-role-new" hidden>
+                                    <input type="text" id="st-cast-role-new-name" placeholder="角色 id，如 红莉栖">
+                                    <button type="button" id="st-cast-role-new-ok">建</button>
+                                </div>
+                                <div class="st-cast-list" id="st-cast-role-list"></div>
+                            </div>
+                            <div class="wb-split wb-split--v wb-split--inline wb-split--cast" data-split="cast-roles" title="拖动调整角色列宽度"></div>
+                            <div class="st-cast-col-acts">
+                                <div class="st-cast-col-head">
+                                    <h4>动作宏</h4>
+                                    <button type="button" id="st-cast-act-add" title="为当前角色新增动作宏">＋</button>
+                                </div>
+                                <div id="st-cast-act-new" hidden>
+                                    <input type="text" id="st-cast-act-new-name" placeholder="宏名，如 惊讶">
+                                    <button type="button" id="st-cast-act-new-ok">建</button>
+                                </div>
+                                <div class="st-blink-global" title="对这个角色的所有动作生效；节奏跟 wasm 自动眨眼走">
+                                    <label class="st-blink-on"><input type="checkbox" id="st-blink-default"> <span>默认眨眼</span></label>
+                                    <label class="st-blink-g-param">眼皮<input type="number" id="st-blink-g-closeValue" step="1" title="closeValue：完全闭上时眼皮线的值，10＝閉じ"></label>
+                                </div>
+                                <div class="st-cast-sep" role="separator" aria-hidden="true"></div>
+                                <div class="st-cast-list" id="st-cast-act-list"></div>
+                            </div>
+                            <div class="wb-split wb-split--v wb-split--inline wb-split--cast" data-split="cast-acts" title="拖动调整动作宏列宽度"></div>
+                            <div class="st-cast-col-fields">
+                                <div class="st-cast-col-head"><h4>属性</h4></div>
+                                <div id="st-cast-fields"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="wb-split wb-split--v" data-split="inspector" title="拖动调整右栏宽度"></div>
+
+            <!-- 右：检查器（场景区已移入左栏；这里只留「本行演出」） -->
+            <aside class="st-col st-col--props" id="wb-inspector">
+                <div id="st-props">
+                    <div class="st-sec">
+                        <h3>本行演出</h3>
+
+                        <!-- 台词模块：本行演出里的第一项，说话者 / 显示名同一行 -->
+                        <section class="wb-linebar" id="wb-linebar" aria-label="台词编辑">
+                            <div class="wb-linebar-head">
+                                <span class="wb-linebar-title">台词 第 <span id="st-sel-idx">1</span> 行</span>
+                                <span class="wb-linebar-line" id="wb-preview-line">—</span>
+                            </div>
+                            <div class="wb-linebar-people">
+                                <label class="st-field st-field--inline"><span>说话者</span><select id="st-role"></select></label>
+                                <label class="st-field st-field--inline"><span>显示名 <em class="st-field-note">留空＝沿用</em></span>
+                                    <span class="st-inline">
+                                        <input type="text" id="st-display-name" placeholder="沿用">
+                                        <button type="button" id="st-name-default" title="填入角色本名">⟲</button>
+                                        <button type="button" id="st-name-makedefault" class="st-quiet" title="把名字写成该角色默认名" disabled>设默认</button>
+                                    </span>
+                                </label>
+                            </div>
+                            <label class="st-field st-field--inline"><span>文本</span><textarea id="st-line-text" rows="2"></textarea></label>
+                            <label class="st-field st-field--inline wb-linebar-wait"><span>AUTO 停顿 <em class="st-field-note">ms，留空＝1200</em></span>
+                                <input type="number" id="st-wait" min="0" step="100" placeholder="1200">
+                            </label>
+                        </section>
+
+                        <!-- 角色语音库：本行演出的语音入口，拖到语音轨／单击加到当前句／双击试听 -->
+                        <div class="st-sub">
+                            <h4>角色语音库 <em class="st-field-note">拖到时间轴语音轨／单击加到当前句／双击试听</em></h4>
+                        </div>
+                        <label class="st-field"><span>角色</span><select id="st-voice-role" title="选择要浏览的角色语音目录"></select></label>
+                        <div class="st-bg-search-row">
+                            <input type="text" id="st-voice-search" autocomplete="off" placeholder="搜索语音文件名…">
+                            <button type="button" id="st-voice-clear" title="清除搜索词">✕</button>
+                        </div>
+                        <div class="st-sfx-picker" id="st-voice-picker" title="语音卡片：拖到时间轴语音轨；单击加到当前句；双击试听"></div>
+                        <div class="st-bgm-empty" id="st-voice-empty" hidden>该角色没有语音</div>
+
+                        <!-- 登台角色：标题独占一行，淡入淡出与添加按钮互不重叠 -->
+                        <div class="st-sub">
+                            <h4>登台角色 <em class="st-field-note">上/下场 · 位置 · 动作 · 绑定</em></h4>
+                        </div>
+                        <div class="st-stage-ops">
+                            <label class="st-fade-field" title="上下场与背景切换的淡入淡出时长（毫秒），缺省 300；0＝瞬间出现/消失。写进行 JSON 的 fadeMs，行内也可单独写 fadeMs 覆盖。">
+                                淡入淡出 <input type="number" id="st-fade-ms" min="0" max="5000" step="100" placeholder="300"> ms
+                            </label>
+                            <button type="button" id="st-stage-add">＋ 添加角色</button>
+                        </div>
+                        <div id="st-stage-list"></div>
+                        <div class="st-live-note">一张卡一个角色：角色与这一句的上/下场 · 位置与缩放 · 本行的动作 · 绑定。语音请在上方「角色语音库」或时间轴语音轨设置。第 1 行的位置就是全场默认，后面不写就沿用上一句。</div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- 底部：问题面板（校验 / 搜索结果） -->
+        <section class="wb-issues" id="wb-issues" hidden aria-label="问题面板">
+            <div class="wb-issues-head">
+                <span id="wb-issues-title">问题（0）</span>
+                <button type="button" id="wb-issues-close" title="收起">×</button>
+            </div>
+            <div class="wb-issues-list" id="wb-issues-list"></div>
+        </section>
+    </section>
+</body>
+</html>

@@ -14,7 +14,7 @@
      PUT  /api/order              写回角色顺序 {"roles": [...]}
      GET  /api/thumbs             static/background/.thumbs/ 里已有的缩略图
      PUT  /api/thumb?name=原图名  收 1280×720 JPEG，落成 .thumbs/<原名>.jpg
-     GET  /api/story              steins_gate/story/scenes/ 下的场景清单
+     GET  /api/story              steins_gate/edit/scenes/ 下的场景清单
      GET/PUT /api/story?name=…     读/写剧本与 cast.json（点保存时调用）
      GET  /api/voice               列出 steins_gate/story/voices/ 下的音频
      GET  /api/voice?name=…        流式播放音频（支持 Range）
@@ -59,19 +59,21 @@ const THUMB_REL = 'static/background/.thumbs';
 const THUMB_MAX = 2 * 1024 * 1024;   // 实测 720p JPEG 约 120~220KB，2MB 兜底
 const IMG_EXT = /\.(jpe?g|png|webp|bmp|gif|avif)$/i;
 
-/* 剧情数据：只写 steins_gate/story/cast.json 与 steins_gate/story/scenes/<name>.json。
+/* 剧情数据：编辑工作台的剧本数据落在 steins_gate/edit/ 下（cast.json 与 scenes/<name>.json）。
+   播放页与编辑页都通过 /api/story 读写，数据位置对前端透明，两页共用同一份。
    文件名允许中文等 Unicode 字母/数字，以及空格、连字符、下划线；路径穿越、控制字符、
    系统保留字符仍由 storyTarget 的 BAD_CHARS / '..' / 前导点检查挡住。 */
-const STORY_DIR = join(ROOT, 'steins_gate', 'story');
+const STORY_DIR = join(ROOT, 'steins_gate', 'edit');
 const SCENE_DIR = join(STORY_DIR, 'scenes');
 const CAST_FILE = join(STORY_DIR, 'cast.json');
 const SCENE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} _-]*\.json$/u;
 
-/* 即时语音：导入 / TTS 合成的音频都落 steins_gate/story/voices/；TTS 走可选外部引擎（默认关闭）
+/* 即时语音：导入 / TTS 合成的音频仍落 steins_gate/story/voices/（音频资源属播放层，不随剧本迁移）；
+   TTS 走可选外部引擎（默认关闭）
    /api/voice             GET 列出 / GET?name= 流式播放（Range，供 <audio> 拖动）
    /api/voice POST        octet-stream 导入音频；application/json {text} 文字 → TTS
                           未配置引擎时 TTS 返回 501，前端据此降级 */
-const VOICE_DIR = join(STORY_DIR, 'voices');
+const VOICE_DIR = join(ROOT, 'steins_gate', 'story', 'voices');
 const VOICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\.(opus|ogg|wav|mp3|m4a|flac|webm)$/i;
 const VOICE_MAX = 12 * 1024 * 1024;   // 单段语音上限 12MB
 const TTS_BIN = process.env.EMOTE_TTS_BIN || '';   // 例：edge-tts；留空即未配置
@@ -295,9 +297,9 @@ function storyTarget(name) {
     if (name.length > 64 || BAD_CHARS.test(name) || name.includes('..') || name.startsWith('.')) {
         throw new Error('非法文件名');
     }
-    if (name === 'cast.json') return { abs: CAST_FILE, rel: 'steins_gate/story/cast.json', kind: 'cast' };
+    if (name === 'cast.json') return { abs: CAST_FILE, rel: 'steins_gate/edit/cast.json', kind: 'cast' };
     if (!SCENE_NAME.test(name)) throw new Error('场景名须为中英文字/数字/空格/连字符/下划线 + .json');
-    return { abs: join(SCENE_DIR, name), rel: 'steins_gate/story/scenes/' + name, kind: 'scene' };
+    return { abs: join(SCENE_DIR, name), rel: 'steins_gate/edit/scenes/' + name, kind: 'scene' };
 }
 
 /* 动作对象只有三个字段：主时间线 + 两个差分槽；写错类型在载入时就该报出来，
@@ -597,9 +599,24 @@ async function handleApi(req, res, pathname) {
             if (text === null) return sendJson(res, 404, { ok: false, error: target.rel + ' 不存在' });
             return send(res, 200, text, { 'Content-Type': 'application/json; charset=utf-8' });
         }
+        if (req.method === 'DELETE') {
+            if (!target || target.kind !== 'scene') {
+                return sendJson(res, 400, { ok: false, error: 'DELETE 只能删除场景（name=xxx.json）' });
+            }
+            try {
+                const scenes = await listScenes();
+                if (scenes.length <= 1) return sendJson(res, 409, { ok: false, error: '至少保留一个剧本' });
+                await unlink(target.abs);
+                console.log(`[story] 删除 ${target.rel}`);
+                return sendJson(res, 200, { ok: true, deleted: target.rel });
+            } catch (err) {
+                if (err.code === 'ENOENT') return sendJson(res, 404, { ok: false, error: '剧本不存在' });
+                return sendJson(res, 500, { ok: false, error: '删除失败：' + err.message });
+            }
+        }
         if (req.method !== 'PUT') {
-            res.setHeader('Allow', 'GET, HEAD, PUT');
-            return sendJson(res, 405, { ok: false, error: '只支持 GET / PUT' });
+            res.setHeader('Allow', 'GET, HEAD, PUT, DELETE');
+            return sendJson(res, 405, { ok: false, error: '只支持 GET / PUT / DELETE' });
         }
         if (!target) return sendJson(res, 400, { ok: false, error: 'PUT 需要 name 参数' });
         let data;

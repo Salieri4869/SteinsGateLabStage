@@ -81,7 +81,7 @@ node main.mjs --port 8000     # or ./run.sh 8000 (macOS / Linux / Git Bash)
 |---|---|
 | `GET/PUT /api/order` | Read/write character order in `character/actions_config/order.json` |
 | `GET /api/thumbs`, `PUT /api/thumb` | Background thumbnails in `static/background/.thumbs/` |
-| `GET/PUT /api/story` | Read/write `steins_gate/story/cast.json` and `steins_gate/story/scenes/*.json` |
+| `GET/PUT /api/story` | Read/write `steins_gate/edit/cast.json` and `steins_gate/edit/scenes/*.json` |
 | `GET /api/voice` | List live-line audio (`steins_gate/story/voices/`) |
 | `GET /api/voice?name=…` | Stream audio with Range support (seekable) |
 | `POST /api/voice` (octet-stream) | Import audio to disk, 12MB max (the page's "Pick audio" / "Audio list" never use this — no disk writes) |
@@ -109,7 +109,7 @@ Any other static server works too — write capabilities just degrade to read-on
 
 ## Scene data format
 
-> This section is the **single source of truth** for the story mode field definitions. A working example lives in `steins_gate/story/scenes/demo.json`.
+> This section is the **single source of truth** for the story mode field definitions. A working example lives in `steins_gate/edit/scenes/demo.json`.
 
 A scene can keep several characters on screen at once. Bind each role to a model in `cast.json`, then declare who appears and where with `stage`:
 
