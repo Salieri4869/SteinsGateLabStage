@@ -488,7 +488,7 @@
         // 隐藏时 wasm 直接丢弃写入：此时 last 与画面上的实际 diff 仍然一致
         // （丢弃＝没改），所以什么都不用做，露出来后差值自会补齐。
         if (p.hide) return;
-        // 调试/验收：window.ST_BLINK_FREEZE = true 时停在当前状态，便于截图确认
+        // 调试开关：冻结在当前眨眼状态
         if (window.ST_BLINK_FREEZE) return;
         var v = Number(p.getVariable(b.track));
         if (!Number.isFinite(v)) return;  // 模型没这个变量 → 没有节奏可跟
@@ -920,7 +920,7 @@
         if (empty) {
             var total = (state.bgmFiles || []).length;
             empty.hidden = shown > 0 || !total;
-            empty.textContent = total ? '没有匹配的音乐' : 'static/bgm/ 下没有音频';
+            empty.textContent = total ? '没有匹配的音乐' : '暂无背景音乐';
         }
     }
 
@@ -1266,7 +1266,8 @@
         renderBgmPicker();
     }
 
-    /* 声效清单：优先 static/sfx/，没有该目录时退回 bgm 清单（两者都是音频文件）。
+    /* 声效清单：只认 static/sfx/，扫到什么就是什么；目录为空或不存在也保持空，
+       不再退回 bgm 清单（bgm 曲目不是声效，混进来只会误导）。
        失败静默为空，不影响编辑。
        provided 可选：外部显式指定清单时跳过目录扫描（供调试/验收直接注入）。 */
     async function loadSfxFiles(provided) {
@@ -1275,12 +1276,6 @@
             var items = await listDir('../../static/sfx/');
             files = items.filter(function (x) { return !x.isDir && AUDIO_RE.test(x.name); })
                 .map(function (x) { return 'sfx/' + x.name; }).sort();
-            // static/sfx/ 缺省时退回 bgm 清单；必须等 loadBgms 填好 state.bgmFiles，
-            // 否则启动三连 loadBackgrounds/loadBgms/loadSfxFiles 并发时会拿到空清单。
-            if (!files.length) {
-                if (!state.bgmFiles || !state.bgmFiles.length) await loadBgms();
-                files = (state.bgmFiles || []).map(function (f) { return 'bgm/' + f; });
-            }
         }
         wb.sfxFiles = files;
         wbRenderSfx();
@@ -1957,6 +1952,7 @@
         histTimer: 0, histDirty: false,   // 延迟提交：改动停止后再压一帧
         pvPlaying: false, pvTimer: 0, pvFullText: '', pvShown: 0, phRaf: 0,
         laneKeyKey: 'story-workbench-lanes', dragLine: -1, dragLane: -1,
+        drawerKey: 'story-workbench-drawers', dragDrawer: null,
         selSeg: null,  // 时间轴上当前选中的段：{lane,from,to,del}，Backspace 删除用
         multiSel: []   // 框选的多个滑块：{el,from,to,commit,opt}；拖动其中一个时整组一起平移
     };

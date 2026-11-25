@@ -1,0 +1,85 @@
+/* ============================================================
+   主题：石墨橙（科技灰 · 80/15/5）
+   加载顺序：story.css → edit.css → 本文件（最后，覆盖 :root 与语义变量）。
+   冷中性科技灰打底（80%）· 橙做唯一主色（15%）· 红留给报警（5%）。
+   强调色取自 steinsgate.jp/reboot：金 #EADC75、
+   品红 #FF059A / 青 #01FFFE 霓虹双色、NEW 红 #EA0037。
+   霓虹只作 2px 签名描边，出现在台词焦点与时间轴播放头。
+   播放层 #st-hud 是逐帧还原原作的硬编码像素色，不受本主题影响。
+   ============================================================ */
+html[data-theme="graphite"] {
+    /* 强调色：冷中性灰，只承担层级与描边，不抢橙的主色位 */
+    --accent:       #9aa7b0;
+    --accent-soft:  rgba(154, 167, 176, .12);
+    --accent-line:  rgba(154, 167, 176, .32);
+    --accent-rgb:   154, 167, 176;
+    /* 橙：回到原来那个橙的火力，琥珀与金收进同一暖色系 */
+    --amber:        #ff9e3d;
+    --amber-soft:   rgba(255, 158, 61, .14);
+    --amber-line:   rgba(255, 158, 61, .42);
+    --amber-rgb:    255, 158, 61;
+    /* 金：官网装饰金 #EADC75，用于图标与高亮描边 */
+    --gold:         #eadc75;
+    --gold-soft:    rgba(234, 220, 117, .14);
+    --gold-line:    rgba(234, 220, 117, .40);
+    --gold-rgb:     234, 220, 117;
+    --violet:       #a9b4bd;
+    --cyan:         #9fb8c4;
+    /* 红：官网 NEW 标记 #EA0037，只给报警与错误 */
+    --danger:       #ea0037;
+    --danger-rgb:   234, 0, 55;
+    /* 文字：中性冷白灰，跟科技灰底同一色温 */
+    --text-1: #eef2f5;
+    --text-2: #c4ced6;
+    --text-3: #9aa7b0;
+    --text-4: #74828c;
+    /* 表面：冷中性科技灰，蓝灰倾向而非青绿也非暖黄 */
+    --surface-0: #0c1013;
+    --surface-1: #161d22;
+    --surface-2: #0e1317;
+    --surface-3: #202a31;
+    /* 描边：冷灰 */
+    --hairline:   rgba(154, 167, 176, .20);
+    --hairline-2: rgba(154, 167, 176, .38);
+    /* 语义：tab 跟随主题主色=橙 */
+    --nav-strong:     #ff8a1f;
+    --nav-strong-fg:  #1a1000;
+    --nav-hover:      #ffb27a;
+    --nav-hover-bg:   rgba(255, 138, 31, .12);
+    --nav-hover-line: #ff8a1f;
+    /* 语义：保存按钮——本套并入橙主色 */
+    --save-bg:       #ff8a1f;
+    --save-fg:       #1a1000;
+    --save-bg-hover: #ffa24d;
+    /* 滚动条：冷灰拇指 + 近黑轨道 */
+    --scroll-track:       #0e1317;
+    --scroll-thumb:       rgba(154, 167, 176, .38);
+    --scroll-thumb-hover: rgba(154, 167, 176, .58);
+    /* 霓虹签名：官网按钮的双色光，压到 2px 只用两处 */
+    --neon-pink: #ff059a;
+    --neon-cyan: #01fffe;
+}
+
+/* 霓虹签名只在本主题出现：台词框聚焦时左右两侧各 2px */
+html[data-theme="graphite"] #wb-linebar .wb-text-wrap:focus-within {
+    border-color: var(--nav-strong);
+    box-shadow: inset 2px 0 0 var(--neon-pink), inset -2px 0 0 var(--neon-cyan);
+}
+html[data-theme="graphite"] #wb-linebar .wb-inline-field:focus {
+    border-bottom-color: var(--nav-strong);
+}
+
+/* 时间轴播放头：保持 2px 细橙线，霓虹只做两侧柔光，不拼硬色块 */
+html[data-theme="graphite"] .wb-tl-playhead {
+    width: 2px;
+    background: var(--nav-strong);
+    box-shadow: -1px 0 5px rgba(255, 5, 154, .38), 1px 0 5px rgba(1, 255, 254, .38),
+                0 0 6px rgba(255, 138, 31, .45);
+}
+html[data-theme="graphite"] .wb-tl-playhead::before { background: var(--nav-strong); }
+
+/* 底栏报警图例用官网红，与主橙拉开 */
+html[data-theme="graphite"] #wb-statusbar .wb-swatch--alert { background: var(--danger); }
+
+/* 顶栏基础色在 story.css 里是硬编码青绿渐变，这里收进科技灰底 */
+html[data-theme="graphite"] #wb-toolbar { background: var(--surface-0); }

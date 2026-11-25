@@ -1,0 +1,52 @@
+/* ============================================================
+   主题：青绿（当前配色方案）
+   加载顺序：story.css → edit.css → 本文件（最后，覆盖 :root 与语义变量）。
+   只定义颜色 token；字号/圆角等结构 token 仍在 story.css 的 :root。
+   播放层 #st-hud 是逐帧还原原作的硬编码像素色，不受本主题影响。
+   ============================================================ */
+html[data-theme="teal"] {
+    /* 强调色：青绿=场景/角色/常规 · 琥珀=BGM · 金=即时台词/提示 */
+    --accent:       #63d6c4;
+    --accent-soft:  rgba(99, 214, 196, .14);
+    --accent-line:  rgba(99, 214, 196, .34);
+    --accent-rgb:   99, 214, 196;
+    --amber:        #e2a45f;
+    --amber-soft:   rgba(226, 164, 95, .14);
+    --amber-line:   rgba(226, 164, 95, .45);
+    --amber-rgb:    226, 164, 95;
+    --gold:         #e9b96e;
+    --gold-soft:    rgba(233, 185, 110, .14);
+    --gold-line:    rgba(233, 185, 110, .42);
+    --gold-rgb:     233, 185, 110;
+    --violet:       #bda7ec;
+    --cyan:         #8fd3e8;
+    --danger:       #d9685a;
+    --danger-rgb:   217, 104, 90;
+    /* 文字 */
+    --text-1: #f0f7f5;
+    --text-2: #d3e2de;
+    --text-3: #aec4bf;
+    --text-4: #8aa29d;
+    /* 表面 */
+    --surface-0: #07141a;
+    --surface-1: #0b1f26;
+    --surface-2: #061116;
+    --surface-3: #122a32;
+    /* 描边 */
+    --hairline:   rgba(99, 214, 196, .22);
+    --hairline-2: rgba(99, 214, 196, .40);
+    /* 语义：主导航选中（tab）——选中填充块+深色字，未选中深底浅字细描边 */
+    --nav-strong:     #63d6c4;
+    --nav-strong-fg:  #07141a;
+    --nav-hover:      #9becdd;
+    --nav-hover-bg:   rgba(99, 214, 196, .12);
+    --nav-hover-line: #63d6c4;
+    /* 语义：保存按钮 */
+    --save-bg:      #1d9e75;
+    --save-fg:      #f2fff9;
+    --save-bg-hover:#28b487;
+    /* 滚动条：青绿低饱和拇指 + 近黑轨道 */
+    --scroll-track:       #07171c;
+    --scroll-thumb:       rgba(99, 214, 196, .34);
+    --scroll-thumb-hover: rgba(99, 214, 196, .55);
+}

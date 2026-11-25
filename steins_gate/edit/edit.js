@@ -692,6 +692,231 @@
         try { localStorage.setItem(wb.laneKeyKey, JSON.stringify(WB_LANES.map(function (l) { return l.key; }))); } catch (_) {}
     }
 
+    /* ====================================================================
+       面板抽屉：左栏与右栏的模块可折叠、拖动排序，状态存 localStorage。
+       拖拽只绑在把手上，用独立 MIME 与背景/BGM/语音卡片的拖放隔离。
+       ==================================================================== */
+    var DRAWER_MIME = 'application/x-wb-drawer';
+    var WbDrawers = [];
+
+    function drawerHost(group) {
+        if (group === 'nav') return document.getElementById('wb-scene-props');
+        return document.querySelector('#st-props .st-sec');
+    }
+
+    function makeGripToggle(head, d, locked) {
+        var grip = document.createElement('span');
+        grip.className = 'wb-drawer-grip';
+        grip.title = '拖动调整顺序';
+        if (!locked) grip.draggable = true;
+        var toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'wb-drawer-toggle';
+        toggle.title = '展开 / 收起';
+        toggle.setAttribute('aria-expanded', 'true');
+        head.insertBefore(grip, head.firstChild);
+        head.appendChild(toggle);
+        head.classList.add('wb-drawer-head');
+        toggle.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            d.open = !d.open; applyDrawerOpen(d); saveDrawerState();
+        });
+        head.addEventListener('click', function (e) {
+            // label 内的抽屉头会触发 input 聚焦；阻止默认行为后点击反馈与其他头一致。
+            e.preventDefault();
+            if (e.target === grip || e.target === toggle || grip.contains(e.target)) return;
+            d.open = !d.open; applyDrawerOpen(d); saveDrawerState();
+        });
+        return { grip: grip, toggle: toggle };
+    }
+
+    // el 保持在原父节点中，只在内部加抽屉头与 body，不改变 DOM 层级。
+    function wrapDrawer(cfg) {
+        var el = cfg.el, head = cfg.head;
+        var d = { key: cfg.key, group: cfg.group, el: el, head: head,
+                  locked: !!cfg.locked, open: true };
+        var gt = makeGripToggle(head, d, d.locked);
+        d.grip = gt.grip; d.toggle = gt.toggle;
+        var body = document.createElement('div');
+        body.className = 'wb-drawer-body';
+        [].slice.call(el.childNodes).forEach(function (n) { if (n !== head) body.appendChild(n); });
+        el.appendChild(body);
+        d.body = body;
+        el.classList.add('wb-drawer', 'wb-drawer--' + cfg.group);
+        el.dataset.drawerKey = cfg.key;
+        WbDrawers.push(d);
+        if (!d.locked) bindDrawerDrag(d);
+        return d;
+    }
+
+    // 用新建外壳包住若干同级节点；用于本行演出里语音/登台段（它们的头与内容是兄弟关系）。
+    function shellDrawer(cfg) {
+        var shell = document.createElement('div');
+        cfg.head.parentNode.insertBefore(shell, cfg.head);
+        var d = { key: cfg.key, group: cfg.group, el: shell, head: cfg.head,
+                  locked: !!cfg.locked, open: true };
+        var gt = makeGripToggle(cfg.head, d, d.locked);
+        d.grip = gt.grip; d.toggle = gt.toggle;
+        shell.appendChild(cfg.head);
+        var body = document.createElement('div');
+        body.className = 'wb-drawer-body';
+        cfg.nodes.forEach(function (n) { body.appendChild(n); });
+        shell.appendChild(body);
+        d.body = body;
+        shell.className = 'wb-drawer wb-drawer--' + cfg.group;
+        shell.dataset.drawerKey = cfg.key;
+        WbDrawers.push(d);
+        if (!d.locked) bindDrawerDrag(d);
+        return d;
+    }
+
+    function applyDrawerOpen(d) {
+        d.el.classList.toggle('is-collapsed', !d.open);
+        if (d.toggle) d.toggle.setAttribute('aria-expanded', d.open ? 'true' : 'false');
+    }
+
+    function bindDrawerDrag(d) {
+        d.grip.addEventListener('dragstart', function (e) {
+            wb.dragDrawer = { key: d.key, group: d.group };
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData(DRAWER_MIME, d.key);
+            e.dataTransfer.setData('text/plain', 'drawer:' + d.key);
+            d.el.classList.add('is-drag');
+        });
+        d.grip.addEventListener('dragend', function () {
+            wb.dragDrawer = null;
+            d.el.classList.remove('is-drag');
+            WbDrawers.forEach(function (x) { x.el.classList.remove('is-over'); });
+        });
+        d.el.addEventListener('dragover', function (e) {
+            if (!wb.dragDrawer || wb.dragDrawer.group !== d.group) return;
+            if (Array.prototype.indexOf.call(e.dataTransfer.types, DRAWER_MIME) < 0) return;
+            e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+            d.el.classList.add('is-over');
+        });
+        d.el.addEventListener('dragleave', function (e) {
+            if (!d.el.contains(e.relatedTarget)) d.el.classList.remove('is-over');
+        });
+        d.el.addEventListener('drop', function (e) {
+            d.el.classList.remove('is-over');
+            if (!wb.dragDrawer || wb.dragDrawer.group !== d.group) return;
+            if (Array.prototype.indexOf.call(e.dataTransfer.types, DRAWER_MIME) < 0) return;
+            e.preventDefault();
+            moveDrawer(wb.dragDrawer.key, d.key, d.group);
+            wb.dragDrawer = null;
+        });
+    }
+
+    function reflowDrawerHost(group) {
+        var host = drawerHost(group);
+        if (!host) return;
+        var first = WbDrawers.filter(function (d) { return d.group === group && d.key === 'project'; });
+        var movable = WbDrawers.filter(function (d) { return d.group === group && !d.locked && d.key !== 'project'; });
+        var last = WbDrawers.filter(function (d) { return d.group === group && d.locked && d.key !== 'project'; });
+        var groupTitle = null;
+        [].slice.call(host.children).forEach(function (c) {
+            if (c.classList && c.classList.contains('wb-res-group-title')) groupTitle = c;
+        });
+        first.concat(movable, last).forEach(function (d) {
+            if (d.key !== 'project') host.appendChild(d.el);
+        });
+        if (first[0]) host.insertBefore(first[0].el, host.firstChild);
+        if (groupTitle) host.insertBefore(groupTitle, first[0] ? first[0].el.nextSibling : host.firstChild);
+    }
+
+    function moveDrawer(from, to, group) {
+        if (from === to) return;
+        var idx = -1, dst = -1;
+        WbDrawers.forEach(function (d, i) {
+            if (d.group !== group || d.locked) return;
+            if (d.key === from) idx = i;
+            if (d.key === to) dst = i;
+        });
+        if (idx < 0 || dst < 0) return;
+        WbDrawers.splice(dst, 0, WbDrawers.splice(idx, 1)[0]);
+        reflowDrawerHost(group);
+        saveDrawerState();
+        msg('面板顺序已调整');
+    }
+
+    function saveDrawerState() {
+        var order = {}, open = {};
+        ['nav', 'insp'].forEach(function (g) {
+            order[g] = WbDrawers.filter(function (d) { return d.group === g; })
+                .map(function (d) { return d.key; });
+        });
+        WbDrawers.forEach(function (d) { open[d.key] = d.open; });
+        try { localStorage.setItem(wb.drawerKey, JSON.stringify({ v: 1, order: order, open: open })); } catch (_) {}
+    }
+
+    function loadDrawerState() {
+        var s = {};
+        try { s = JSON.parse(localStorage.getItem(wb.drawerKey) || '{}'); } catch (_) {}
+        var byKey = {}; WbDrawers.forEach(function (d) { byKey[d.key] = d; });
+        WbDrawers.forEach(function (d) {
+            d.open = (s.open && typeof s.open[d.key] === 'boolean') ? s.open[d.key] : true;
+            applyDrawerOpen(d);
+        });
+        var rebuilt = [];
+        ['nav', 'insp'].forEach(function (g) {
+            var want = (s.order && Array.isArray(s.order[g])) ? s.order[g] : [];
+            var used = {}, ordered = [];
+            want.forEach(function (k) { if (byKey[k] && byKey[k].group === g && !used[k]) {
+                ordered.push(byKey[k]); used[k] = 1;
+            } });
+            WbDrawers.filter(function (d) { return d.group === g && !used[d.key]; })
+                .forEach(function (d) { ordered.push(d); });
+            ordered.forEach(function (d) { rebuilt.push(d); });
+        });
+        WbDrawers = rebuilt;
+        ['nav', 'insp'].forEach(function (g) { reflowDrawerHost(g); });
+    }
+
+    function collectAfter(node, stopClass) {
+        var out = [], n = node.nextSibling;
+        while (n && !(n.nodeType === 1 && n.classList && n.classList.contains(stopClass))) {
+            if (n.nodeType === 1) out.push(n);
+            n = n.nextSibling;
+        }
+        return out;
+    }
+
+    function bindDrawers() {
+        if (WbDrawers.length) return;
+        var nav = document.getElementById('wb-nav');
+        var head = document.querySelector('.wb-nav-head');
+        var sceneGroup = document.querySelector('.wb-nav-scene-group');
+        var sceneProps = document.getElementById('wb-scene-props');
+        var hist = document.querySelector('.wb-nav-history');
+        var propsSec = document.querySelector('#st-props .st-sec');
+        if (!nav || !head || !sceneGroup || !sceneProps || !hist || !propsSec) return;
+
+        // 左栏：项目（剧本 + 标题）为固定首项；资源抽屉组背景 / 背景音乐 / 声效 / 改动历史可排序。
+        shellDrawer({ key: 'project', group: 'nav', head: head, nodes: [sceneGroup], locked: true });
+        wrapDrawer({ key: 'history', group: 'nav', el: hist,
+                     head: hist.querySelector('.wb-nav-group-title'), locked: true });
+        var keys = ['bg', 'bgm', 'sfx'];
+        var sels = ['.st-bg-field', '.st-bgm-field', '.st-sfx-field'];
+        keys.forEach(function (key, idx) {
+            var label = sceneProps.querySelector(sels[idx] + ' > .wb-nav-group-title');
+            if (label && label.parentNode) wrapDrawer({ key: key, group: 'nav',
+                el: label.parentNode, head: label });
+        });
+
+        // 右栏：台词 / 角色语音库 / 登台角色。linebar 就地包装，保持 .st-sec 直接子元素。
+        var linebar = propsSec.querySelector('#wb-linebar');
+        if (linebar) wrapDrawer({ key: 'linebar', group: 'insp', el: linebar,
+            head: linebar.querySelector('.wb-linebar-head') });
+        var subs = [].slice.call(propsSec.children).filter(function (c) {
+            return c.classList && c.classList.contains('st-sub');
+        });
+        if (subs.length >= 2) {
+            shellDrawer({ key: 'voice', group: 'insp', head: subs[0], nodes: collectAfter(subs[0], 'st-sub') });
+            shellDrawer({ key: 'stage', group: 'insp', head: subs[1], nodes: collectAfter(subs[1], 'st-sub') });
+        }
+        loadDrawerState();
+    }
+
     /* ---- 预览字幕：点某句立刻显示该句台词；空格切换逐字播放/暂停 ---- */
     function wbCaptionShow(full, instant) {
         wb.pvFullText = String(full || '');
@@ -1611,8 +1836,7 @@
         markStale(); refreshAfterTimelineEdit();
     }
     /* 改长度（ripple）：拖一块的边界，邻块保持原长度整体被推走（伸长）
-       或原位不动（缩短留空）。getVal 返回逐句值当段键。
-       取代旧的 wbNeighborRun（相邻补偿）——用户要的是 Vegas 式推挤。 */
+       或原位不动（缩短留空）。getVal 返回逐句值当段键。 */
     function wbStretchRun(oldF, oldT, f, t, getVal, setVal) {
         var n = lines().length, i;
         var values = [];
@@ -1906,12 +2130,11 @@
     }
     function wbRenderIssues() {
         var list = $('wb-issues-list'), badge = $('wb-issue-badge'), title = $('wb-issues-title');
+        var count = $('wb-issue-count');
         var issues = wbValidate();
         var errs = issues.filter(function (x) { return x.sev === 'err'; }).length;
-        if (badge) {
-            badge.textContent = issues.length ? (errs ? '✕ ' + errs : '⚠ ' + issues.length) : '✓ 0';
-            badge.classList.toggle('has-issue', issues.length > 0);
-        }
+        if (badge) badge.classList.toggle('has-issue', issues.length > 0);
+        if (count) count.textContent = issues.length ? (errs ? '✕ ' + errs : '⚠ ' + issues.length) : '✓ 0';
         if (title) title.textContent = '问题（' + issues.length + '）' + (errs ? ' · ' + errs + ' 处错误' : '');
         if (!list) return;
         list.innerHTML = '';
@@ -2311,6 +2534,7 @@
     function wbBind() {
         wbLoadLayout();
         wbLoadLaneOrder();
+        bindDrawers();
         wbBindSplits();
 
         /* 编辑页专属：全屏只全屏工作台本身（#st-editor），背后播放层/画布不进全屏，
@@ -2389,8 +2613,7 @@
             wb.tick = Math.max(36, Math.min(320, Math.floor((scroll.clientWidth - 104 - 12) / n)));
             wbRenderTimeline(); scroll.scrollLeft = 0;
         });
-        // 滚轮：默认缩放（锚定光标所在句）；Shift+滚轮＝纵向滚动轨道。
-        // 之前无条件 preventDefault 导致鼠标放上去完全滚不动，这里给 Shift 留一条原生纵向滚动通道。
+        // 滚轮：默认缩放（锚定光标所在句）；Shift+滚轮保留浏览器原生纵向滚动。
         var tlScroll = $('wb-tl-scroll');
         if (tlScroll) tlScroll.addEventListener('wheel', function (e) {
             if (e.shiftKey) {
@@ -2468,6 +2691,15 @@
         var badge = $('wb-issue-badge'), issues = $('wb-issues'), iClose = $('wb-issues-close');
         if (badge) badge.addEventListener('click', function () { if (issues) issues.hidden = !issues.hidden; });
         if (iClose) iClose.addEventListener('click', function () { if (issues) issues.hidden = true; });
+
+        // 配色切换：青绿 / 石墨橙，写入 localStorage，刷新后保持
+        var themeBtn = $('wb-theme-toggle');
+        if (themeBtn) themeBtn.addEventListener('click', function () {
+            var next = document.documentElement.getAttribute('data-theme') === 'graphite' ? 'teal' : 'graphite';
+            document.documentElement.setAttribute('data-theme', next);
+            try { localStorage.setItem('story-workbench-theme', next); } catch (_) {}
+            themeBtn.title = next === 'graphite' ? '当前：石墨橙（点切回青绿）' : '当前：青绿（点切到石墨橙）';
+        });
 
         // 剧本下拉切换 + 新建/删除
         var scSel = $('wb-scene-select');
@@ -2961,6 +3193,12 @@
         return wrap;
     }
 
+    // 台词字数：常驻显示，输入与切行时同步。
+    function wbUpdateTextCount() {
+        var t = $('st-line-text'), c = $('wb-text-count');
+        if (t && c) c.textContent = (t.value || '').length + ' 字';
+    }
+
     function renderProps() {
         if (!state.scene) return;
         setVal($('st-title'), state.scene.title || '');
@@ -2982,6 +3220,7 @@
         fillSelect($('st-role'), castKeys(),
             line.role || '', '旁白', roleLabel);
         setVal($('st-line-text'), line.text || '');
+        wbUpdateTextCount();
         renderNameField(line);
 
         renderRoster();       // 角色卡：上下场、站位、本行动作与语音都跟着当前行走
@@ -2994,14 +3233,12 @@
     function renderNameField(line) {
         var field = $('st-display-name');
         var btn = $('st-name-default');
-        var mk = $('st-name-makedefault');
         if (!field) return;
         if (!line) {
             field.value = '';
             field.placeholder = '';
             field.disabled = true;
             if (btn) btn.disabled = true;
-            if (mk) mk.disabled = true;
             return;
         }
         var role = speakerOf(line);
@@ -3015,14 +3252,6 @@
         if (btn) {
             btn.disabled = noName;
             btn.title = '填入角色本名「' + castName(role) + '」（用来揭示真名）';
-        }
-        if (mk) {
-            // 只有填了名字、且和当前默认名不同时才有意义
-            var v = own.trim();
-            mk.disabled = noName || !v || v === castName(role);
-            mk.title = v
-                ? '把「' + v + '」写成「' + role + '」的默认名，之后所有没单独改过的行都显示它'
-                : '先在左边填一个名字';
         }
     }
 
@@ -3103,10 +3332,8 @@
 
     /* ---------- 模式与场景 ---------- */
 
-    /* 每次进入剧情模式、以及换剧本之后，都重播一遍对话框开场（窗口擦入 + 装饰线 + 名牌）。
-       不重播的话 HUD 会直接以「已铺开」的终态出现——切剧本、编辑↔播放来回切都看不到动画，
-       看起来就像「这次没加载」。open() 内部从第 0 帧起跑，会先撤掉 is-open，
-       所以 AUTO 提示牌的滑入也一并重来。 */
+    /* 每次进入剧情模式、以及换剧本之后，都重播一遍对话框开场（窗口擦入 + 装饰线 + 名牌），
+       否则 HUD 会以「已铺开」的终态直接出现。open() 从第 0 帧起跑，AUTO 提示牌的滑入一并重来。 */
     /* 开场动画（intro）串行令牌：进入剧情模式、切剧本、编辑→播放都可能起一次 intro，
        每次带一个 2 秒兜底 timer。若在前一次 intro 还没结束时又起新的（典型：进故事模式
        后马上切剧本），两个 timer 会各自触发一次 restart → 首句文字和语音播两遍。
@@ -3638,8 +3865,38 @@
             line.text = this.value;
             var li = $('st-lines').children[state.sel];
             if (li) li.querySelector('.st-line-text').textContent = this.value;
+            wbUpdateTextCount();
             markStale();
         });
+        // 台词就地编辑：聚焦时记录原值；取消还原，完成只是收起编辑态（改动已实时写入）。
+        (function () {
+            var t = $('st-line-text'), snapshot = '';
+            if (!t) return;
+            t.addEventListener('focus', function () { snapshot = this.value; });
+            var cancel = $('wb-text-cancel'), done = $('wb-text-done');
+            // 阻止 mousedown 抢焦点，否则编辑条会先消失、click 落不到按钮上。
+            if (cancel) cancel.addEventListener('mousedown', function (e) { e.preventDefault(); });
+            if (done) done.addEventListener('mousedown', function (e) { e.preventDefault(); });
+            if (cancel) cancel.addEventListener('click', function () {
+                t.value = snapshot;
+                t.dispatchEvent(new Event('input', { bubbles: true }));
+                t.blur();
+            });
+            if (done) done.addEventListener('click', function () { t.blur(); });
+        })();
+        // AUTO 停顿 −／＋：沿用既有 input 校验，步进 100ms。
+        (function () {
+            var dec = $('wb-wait-dec'), inc = $('wb-wait-inc');
+            function step(delta) {
+                var w = $('st-wait');
+                if (!w) return;
+                var v = Number(w.value);
+                w.value = String(Math.max(0, (isFinite(v) ? v : 0) + delta));
+                w.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            if (dec) dec.addEventListener('click', function () { step(-100); });
+            if (inc) inc.addEventListener('click', function () { step(100); });
+        })();
         // 显示名：留空＝沿用上一句（删掉字段），写什么就从这个角色这一句起生效
         $('st-display-name').addEventListener('input', function () {
             var line = lines()[state.sel];
@@ -3659,21 +3916,6 @@
             markStale();
             renderNameField(line);
             renderList();
-        });
-        // 设默认：把这一行的称呼写成角色的默认名（写 cast，不动这一行的 line.name）
-        $('st-name-makedefault').addEventListener('click', function () {
-            var line = lines()[state.sel];
-            if (!line) return;
-            var role = speakerOf(line);
-            var v = (typeof line.name === 'string' ? line.name : '').trim();
-            if (!v) return;
-            var item = state.cast[role] || (state.cast[role] = {});
-            item.name = v;
-            markStale();
-            renderList();
-            renderProps();          // 说话者下拉、角色卡下拉里的「助手（红莉栖）」
-            renderDrawer();
-            msg('「' + role + '」的默认名已设为「' + v + '」');
         });
         /* 角色卡里的「本行」是动态生成的，用容器上的事件委托。
            data-key=action/timeline/diff1/diff2 是下拉，macro 是输入；
@@ -3796,7 +4038,7 @@
         $('st-stage-add').addEventListener('click', function () {
             var used = state.baseStage.map(function (s) { return s.role; });
             var pick = castRoles().filter(function (r) { return used.indexOf(r) < 0; })[0];
-            if (!pick) { msg('cast.json 里没有更多可用角色了'); return; }
+            if (!pick) { msg('角色表里没有更多可用角色了'); return; }
             // 左右交替给个初始站位，避免新角色叠在同一侧；位置随后在角色卡第二排调
             state.baseStage.push({ role: pick,
                 x: used.length ? (used.length % 2 ? 0.4 : -0.4) : 0,
@@ -4024,7 +4266,7 @@
         if (!ta || !a) return;
         var parsed = parsePastedVars(ta.value);
         if (!parsed.length) {
-            setPasteMsg('没解析出变量，请粘贴 [{name,value,duration}, ...] 格式的 JSON。', 'err');
+            setPasteMsg('没识别出变量，请按每行一条粘贴：名称、数值、时长。', 'err');
             return;
         }
         var vars = a.variables || (a.variables = []);
@@ -4330,6 +4572,10 @@
         refreshWorkbench: refreshWorkbench,
         wbLoadLayout: wbLoadLayout,
         wbSaveLayout: wbSaveLayout,
+        bindDrawers: bindDrawers,
+        saveDrawerState: saveDrawerState,
+        loadDrawerState: loadDrawerState,
+        wbDrawers: function () { return WbDrawers; },
         wbBindSplits: wbBindSplits,
         wbBind: wbBind,
         setTab: setTab,

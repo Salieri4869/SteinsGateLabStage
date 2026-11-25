@@ -60,7 +60,7 @@
             <!-- 编辑入口已拆到独立页面（../edit/），两页 wasm 内存互不干扰。
                  保留这个按钮但隐藏，仅供既有验收脚本触发原地编辑；正常用户走上面的「编辑 ↗」。 -->
             <button type="button" data-mode="edit" hidden aria-hidden="true" tabindex="-1"></button>
-            <a class="st-goto-edit" href="../edit/index.html" title="打开独立编辑工作台（另起 wasm 实例，不影响剧情模式内存）">编辑 ↗</a>
+            <a class="st-goto-edit" href="../edit/index.html" title="打开独立编辑工作台，不影响当前剧情预览">编辑 ↗</a>
         </div>
         <button type="button" id="st-full" title="全屏：隐藏浏览器边框与顶栏，只留画面">全屏</button>
     </header>
@@ -260,7 +260,7 @@
                                     <button type="button" id="st-cast-role-add" title="新增角色">＋</button>
                                 </div>
                                 <div id="st-cast-role-new" hidden>
-                                    <input type="text" id="st-cast-role-new-name" placeholder="角色 id，如 红莉栖">
+                                    <input type="text" id="st-cast-role-new-name" placeholder="角色名，如 红莉栖">
                                     <button type="button" id="st-cast-role-new-ok">建</button>
                                 </div>
                                 <div class="st-cast-list" id="st-cast-role-list"></div>
@@ -274,7 +274,7 @@
                                     <input type="text" id="st-cast-act-new-name" placeholder="宏名，如 惊讶">
                                     <button type="button" id="st-cast-act-new-ok">建</button>
                                 </div>
-                                <div class="st-blink-global" title="对这个角色的所有动作生效；节奏跟 wasm 自动眨眼走">
+                                <div class="st-blink-global" title="对这个角色的所有动作生效；眨眼按模型内置节奏自动进行">
                                     <label class="st-blink-on"><input type="checkbox" id="st-blink-default"> <span>默认眨眼</span></label>
                                     <label class="st-blink-g-param">眼皮<input type="number" id="st-blink-g-closeValue" step="1" title="closeValue：完全闭上时眼皮线的值，10＝閉じ"></label>
                                 </div>
@@ -368,7 +368,7 @@
 
                         <div class="st-sub">
                             <h4>登台角色</h4>
-                            <label class="st-fade-field" title="上下场与背景切换的淡入淡出时长（毫秒），缺省 300；0＝瞬间出现/消失。写进行 JSON 的 fadeMs，行内也可单独写 fadeMs 覆盖。">
+                            <label class="st-fade-field" title="上下场与背景切换的淡入淡出时长（毫秒），默认 300；0＝瞬间出现或消失。当前行可单独设置来覆盖。">
                                 淡入淡出 <input type="number" id="st-fade-ms" min="0" max="5000" step="100" placeholder="300"> ms
                             </label>
                             <button type="button" id="st-stage-add">＋ 添加角色</button>
