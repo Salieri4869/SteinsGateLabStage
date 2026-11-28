@@ -48,8 +48,6 @@
         bgmResizing: false,    // 拖动 BGM 段期间暂停按行切曲
         bgmFadeRaf: 0,         // 淡入/淡出音量渐变的 rAF id
         bgmFadeSeq: 0,         // 淡入/淡出令牌：切曲或重播时 +1，旧动画据此作废
-        soundFolders: [], soundFiles: {},
-        liveOpen: false, liveSrc: 'file', liveBusy: false, liveRole: '', blobUrl: '',
         // 多角色：actors[role] = { player, config, ... }；casting 由 scene.stage 决定
         // baseStage 是场景默认站位（只读基准），stage 是当前生效站位（会被行内 move 改写）
         actors: {}, baseStage: [], stage: [], layout: null, speaker: '', stageRaf: 0,
@@ -105,10 +103,11 @@
         return '/api/story' + (name ? '?name=' + encodeURIComponent(name) : '');
     }
     function msg(text) {
-        $('st-msg').textContent = text || '';
+        var el = $('st-msg');
+        el.textContent = text || '';
         if (text) {
             setTimeout(function () {
-                if ($('st-msg').textContent === text) $('st-msg').textContent = '';
+                if (el.textContent === text) el.textContent = '';
             }, 4000);
         }
     }
@@ -229,10 +228,6 @@
         return Object.keys(state.cast || {}).filter(function (r) {
             return r !== 'doc' && !!(state.cast[r] && state.cast[r].model);
         });
-    }
-    /* 当前已经加载了模型、可安全用于「说话/动作/语音」的角色 id */
-    function liveRoles() {
-        return Object.keys(state.actors).filter(function (r) { return !!state.actors[r].player; });
     }
     function playerOf(role) {
         var a = state.actors[role];
@@ -1212,6 +1207,27 @@
         var p = a.play();
         if (p && p.catch) p.catch(function () { /* 音频解锁前可能失败，静默 */ });
     }
+    /* 日历子窗口按句演出：场景 subwin 打底，逐行把写过的字段叠上去（字段级沿用，
+       只改通知不会把上一句的日期吃掉）。空值＝回到现实日期 / 无通知。有短信 / 来短信 /
+       来电都写在行上，按句切换。 */
+    function subwinAt(idx) {
+        var out = {};
+        var merge = function (sw) {
+            if (!sw || typeof sw !== 'object' || Array.isArray(sw)) return;
+            ['month', 'day', 'week', 'notify'].forEach(function (k) {
+                if (sw[k] !== undefined && sw[k] !== null) out[k] = sw[k];
+            });
+        };
+        merge(state.scene && state.scene.subwin);
+        var list = lines();
+        for (var i = 0; i <= Math.min(Math.max(0, idx | 0), list.length - 1); i++) {
+            merge(list[i] && list[i].subwin);
+        }
+        return out;
+    }
+    function syncSubwin(idx) {
+        if (window.Subwin) window.Subwin.set(subwinAt(idx));
+    }
     /* 编辑态试听：只有点右侧「播放」才走到这里；再点同一段＝停止（带该段 fadeOut） */
     function previewBgm(j) {
         var b = bgmList()[j];
@@ -1347,10 +1363,10 @@
 
     /* 句末齿轮显隐：仅「播放态 + 非 AUTO + 窗口已铺好 + 有台词 + 打字已完成」时显示。
        打字过程中不显示，打完那一刻才出现（原作「按键等待」语义），随后一直转到翻页。
-       AUTO 打开 / 编辑态 / 即时台词 / 全剧终 / 开场动画中 → 隐藏。 */
+       AUTO 打开 / 编辑态 / 全剧终 / 开场动画中 → 隐藏。 */
     function syncGear() {
         var show = state.mode === 'play'
-                && !state.autoOn && !state.ended && !state.liveOpen && !state.introPending
+                && !state.autoOn && !state.ended && !state.introPending
                 && !state.typing
                 && (($('st-text-txt').textContent || '').length > 0)
                 && !!window.SGDialog && window.SGDialog.isOpen();
@@ -1364,7 +1380,9 @@
         state.seq++;
     }
 
-    function setHint(text) { $('st-hint').textContent = text; }
+    /* 对话框里的「点击继续 / 自动推进中」提示已按用户要求移除，调用点保留为无害空操作，
+       避免 edit 工作台等处仍通过 ST.setHint 调用时报错。 */
+    function setHint() {}
     /* 有无播放器还在等首次手势才能出声（浏览器自动播放策略）。
        有语音的那一句会 pending，AUTO 因此停在首句 —— 此时要提示用户点一下，
        否则看起来像「AUTO 开了却不说话」。 */
@@ -1531,13 +1549,9 @@
     }
 
     /* AUTO 开关：改状态 + 记到 localStorage；开着立刻对当前这句续上计时 */
-    /* AUTO 芯片：换成图集里的原生切片，而不是切换 CSS 样式 */
+    /* 新的 AUTO 标签靠 #st-auto.is-on 直接切雪碧图的橙字帧，不再换 img src；
+       这里只管右下角的 »AUTO 提示牌：开则出，关则收。 */
     function paintAutoBtn() {
-        var img = $('st-auto-img');
-        if (!img) return;
-        var src = 'ui/auto_' + (state.autoOn ? 'on' : 'off') + '.webp';
-        if (img.getAttribute('src') !== src) img.setAttribute('src', src);
-        // 右下角的 »AUTO 提示牌：开则出，关则收
         var plate = $('st-autoplate');
         if (plate) plate.classList.toggle('is-on', state.autoOn);
     }
@@ -1625,6 +1639,7 @@
         state.lineStart = performance.now();
         syncBgm(state.idx);   // 进入该行所属 BGM 区间；同区间跨行不打断
         syncSfx(state.idx);   // 该句起点的声效（区间首句才响一次）
+        syncSubwin(state.idx);  // 日历子窗口：按本行 subwin 切日历/有短信/来短信/来电
 
         var line = list[state.idx];
         var role = speakerOf(line);
@@ -1681,262 +1696,15 @@
         renderLine(state.idx + 1);
     }
 
-    /* ---------- 即时台词（独立于剧本，让当前立绘开口） ----------
-       语音来源三种：
-         ① 选择音频——本地文件在浏览器内生成临时 blob URL 直接播，不落盘、不上传；
-         ② 音频列表——列出 character/sounds/ 下的文件夹 + 文件，选中的静态路径直接播，不落盘；
-         ③ 文字合成——POST /api/voice 走服务端 TTS，未配引擎返回 501，前端提示降级。
-       三个来源都不写 story/voices/；只有文字合成的 TTS 落盘到那里。
-       当前立绘由场景加载，角色下拉只决定动作宏集合——换造型仍走场景/剧本。 */
-
-    function liveMsg(text, isErr) {
-        var el = $('st-live-msg');
-        el.textContent = text || '';
-        el.classList.toggle('err', !!isErr);
-    }
-
-    /* 只刷新「即时台词」的角色下拉，不重复绑定事件（切换场景时调用） */
-    function refreshLiveRoles() {
-        var roles = liveRoles();
-        var current = state.liveRole;
-        if (roles.indexOf(current) < 0) {
-            current = lines()[0] && roles.indexOf(lines()[0].role) >= 0
-                ? lines()[0].role : (roles[0] || '');
-        }
-        state.liveRole = current;
-        fillSelect($('st-live-role'), roles, current, '');
-        renderLiveActions();
-    }
-
-    function initLive() {
-        refreshLiveRoles();
-        // 动作下拉（来自所选角色的 actions）
-        $('st-live-role').addEventListener('change', function () {
-            state.liveRole = this.value;
-            renderLiveActions();
+    /* ---------- 全屏：由 SYSTEM 菜单的 FULL SCREEN 项触发，这里只做对话框重排 ---------- */
+    function initFullscreen() {
+        // 全屏中的退出按钮两页都有确定 DOM，直接绑定。
+        document.addEventListener('fullscreenchange', function () {
+            if (window.SGDialog) window.SGDialog.fit();
         });
-        // 三个来源 tab
-        var tabs = document.querySelectorAll('#st-live .st-live-tabs button');
-        for (var i = 0; i < tabs.length; i++) {
-            tabs[i].addEventListener('click', function () {
-                setLiveSrc(this.getAttribute('data-src'));
-            });
-        }
-        $('st-live-toggle').addEventListener('click', toggleLive);
-        $('st-live-close').addEventListener('click', closeLive);
-        $('st-live-say').addEventListener('click', liveSay);
-        $('st-live-stop').addEventListener('click', liveStop);
-        // 全屏：进/出都切一次，切完让对话框层重新按视口算缩放
-        var fullBtn = $('st-full');
-        if (fullBtn) {
-            var syncFull = function () {
-                fullBtn.textContent = document.fullscreenElement ? '退出全屏' : '全屏';
-            };
-            fullBtn.addEventListener('click', function () {
-                if (document.fullscreenElement) {
-                    if (document.exitFullscreen) document.exitFullscreen();
-                } else {
-                    var de = document.documentElement;
-                    if (de.requestFullscreen) de.requestFullscreen();
-                }
-            });
-            document.addEventListener('fullscreenchange', function () {
-                syncFull();
-                if (window.SGDialog) window.SGDialog.fit();
-            });
-            // 无头 / 不支持全屏的浏览器：按钮直接置灰，别留个假开关
-            if (!document.documentElement.requestFullscreen) fullBtn.disabled = true;
-            var exitBtn = $('st-full-exit');
-            if (exitBtn) {
-                exitBtn.addEventListener('click', function () {
-                    if (document.exitFullscreen) document.exitFullscreen();
-                });
-            }
-        }
-        $('st-live-file').addEventListener('change', function () {
-            var f = this.files && this.files[0];
-            var nameEl = $('st-live-file-name');
-            nameEl.textContent = f ? f.name : '未选择文件';
-            nameEl.classList.toggle('has-file', !!f);
-            liveMsg(f ? '已选：' + f.name : '');
+        $('st-full-exit').addEventListener('click', function () {
+            if (document.exitFullscreen) document.exitFullscreen();
         });
-        // 音频列表：文件夹决定文件下拉
-        $('st-live-sound-folder').addEventListener('change', function () {
-            loadSoundFiles(this.value);
-        });
-        loadSoundFolders();
-    }
-
-    function renderLiveActions() {
-        var item = state.cast && state.cast[state.liveRole];
-        var acts = (item && item.actions) ? Object.keys(item.actions) : [];
-        fillSelect($('st-live-action'), acts, '', '（无动作）');
-    }
-
-    function setLiveSrc(src) {
-        state.liveSrc = src;
-        var tabs = document.querySelectorAll('#st-live .st-live-tabs button');
-        for (var i = 0; i < tabs.length; i++) {
-            tabs[i].classList.toggle('is-active', tabs[i].getAttribute('data-src') === src);
-        }
-        var panes = document.querySelectorAll('#st-live [data-src-pane]');
-        for (var j = 0; j < panes.length; j++) {
-            panes[j].hidden = panes[j].getAttribute('data-src-pane') !== src;
-        }
-        liveMsg('');
-    }
-
-    function toggleLive() {
-        if (state.liveOpen) closeLive(); else openLive();
-    }
-    function openLive() {
-        if (state.mode === 'edit') setMode('play');
-        state.liveOpen = true;
-        $('st-live').hidden = false;
-        $('st-live-toggle').classList.add('is-active');
-        // 打开时冻结剧本当前行，避免打字机把台词覆盖
-        clearTimers();
-        if (state.ctx) stopVoices();
-        $('st-name').classList.remove('is-alias');
-        if (window.SGDialog) window.SGDialog.setName(castName(state.liveRole));
-        $('st-text-txt').textContent = '';
-        syncGear();   // 即时台词模式：齿轮隐藏
-        setHint('即时台词模式');
-        liveMsg('');
-    }
-    function closeLive() {
-        state.liveOpen = false;
-        state.liveBusy = false;
-        $('st-live').hidden = true;
-        $('st-live-toggle').classList.remove('is-active');
-        stopVoices();
-        releaseBlobUrl();
-        // 回到剧本：只恢复当前行画面与文本，不重播已说过的台词/语音
-        if (state.mode === 'play') renderLine(state.idx, true);
-    }
-
-    /* 释放上一次导入的临时音频：回收 blob URL，并清掉它的解码缓冲
-       （bufferCache 以 URL 为键，blob 地址每次都不同，不清会一直累积） */
-    function releaseBlobUrl() {
-        if (state.blobUrl) {
-            URL.revokeObjectURL(state.blobUrl);
-            eachAudio(function (ap) { if (ap.bufferCache) ap.bufferCache.delete(state.blobUrl); });
-            state.blobUrl = '';
-        }
-    }
-
-    /* 把本地文件变成浏览器内的临时 URL 直接播放，不落盘、不上传服务端 */
-    function importSelectedVoice() {
-        var f = $('st-live-file').files && $('st-live-file').files[0];
-        if (!f) return Promise.reject(new Error('请先选择一个音频文件'));
-        releaseBlobUrl();
-        state.blobUrl = URL.createObjectURL(f);
-        return Promise.resolve(state.blobUrl);
-    }
-
-    /* 音频列表：character/sounds/ 两级目录（文件夹 → 音频文件）。
-       复用已有的 listDir() 读目录索引，与背景/模型下拉同源；播放走静态路径，不落盘。 */
-    async function loadSoundFolders() {
-        var items = await listDir('../../character/sounds/');
-        state.soundFolders = items.filter(function (x) { return x.isDir; })
-            .map(function (x) { return x.name; }).sort();
-        fillSelect($('st-live-sound-folder'), state.soundFolders,
-            state.soundFolders[0] || '', '（无文件夹）');
-        if (state.soundFolders.length) await loadSoundFiles(state.soundFolders[0]);
-    }
-
-    async function loadSoundFiles(folder) {
-        var sel = $('st-live-sound-file');
-        if (!folder) { fillSelect(sel, [], '', '（无音频）'); return; }
-        if (!state.soundFiles[folder]) {
-            var items = await listDir('../../character/sounds/' + encodeURIComponent(folder) + '/');
-            state.soundFiles[folder] = items.filter(function (x) { return !x.isDir && AUDIO_RE.test(x.name); })
-                .map(function (x) { return x.name; }).sort();
-        }
-        var files = state.soundFiles[folder];
-        fillSelect(sel, files, files[0] || '', '（选择音频）');
-    }
-
-    function voiceUrlForPlay() {
-        if (state.liveSrc === 'file') return importSelectedVoice();
-        if (state.liveSrc === 'list') {
-            var folder = $('st-live-sound-folder').value;
-            var file = $('st-live-sound-file').value;
-            if (!folder || !file) return Promise.reject(new Error('请先选择文件夹和音频'));
-            return Promise.resolve('../../character/sounds/' + encodeURIComponent(folder) + '/' + encodeURIComponent(file));
-        }
-        // tts：POST 文字合成，拿返回的音频 URL
-        var text = ($('st-live-text').value || '').trim();
-        if (!text) return Promise.reject(new Error('请先输入文字'));
-        return fetch('/api/voice', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: text })
-        }).then(function (r) { return r.json().then(function (j) { return { r: r, j: j }; }); })
-          .then(function (x) {
-              if (x.r.status === 501) throw new Error(x.j.error || 'TTS 未配置');
-              if (!x.r.ok || !x.j.ok) throw new Error(x.j.error || ('合成失败 ' + x.r.status));
-              return x.j.url;
-          });
-    }
-
-    async function liveSay() {
-        if (!state.liveOpen) openLive();
-        if (!audioFor(state.liveRole) || !playerOf(state.liveRole)) { liveMsg('立绘尚未就绪', true); return; }
-        var text = $('st-live-text').value || '';
-        liveStop();
-        state.speaker = state.liveRole;   // 口型跟到所选角色
-
-        // 语音 URL（可能是异步上传/合成）；任一来源失败就只打字、不说话
-        var urlPromise;
-        try { urlPromise = voiceUrlForPlay(); }
-        catch (err) { urlPromise = Promise.reject(err); }
-
-        // 打字机 + 显示名字（即时台词没有剧情上下文，用角色默认名）
-        $('st-name').classList.remove('is-alias');
-        if (window.SGDialog) window.SGDialog.setName(castName(state.liveRole));
-        var mySeq = ++state.seq;
-        state.liveBusy = true;
-        $('st-live-say').disabled = true;
-        $('st-live-stop').disabled = false;
-        liveMsg('');
-
-        Promise.resolve(urlPromise).then(function (url) {
-            if (!url || mySeq !== state.seq) return;
-            liveMsg('播放中…');
-            return audioFor(state.liveRole).loadAndPlay(url).then(function () {
-                if (mySeq === state.seq) liveMsg('播放完成');
-            });
-        }).catch(function (err) {
-            if (mySeq === state.seq) liveMsg(err.message || '语音播放失败', true);
-        });
-
-        var el = $('st-text-txt');
-        el.textContent = '';
-        var i = 0;
-        (function tick() {
-            if (mySeq !== state.seq) return;
-            if (i >= text.length) { finishLive(); return; }
-            el.textContent += text.charAt(i++);
-            state.typeTimer = setTimeout(tick, TYPE_MS);
-        })();
-        // 动作宏
-        var act = $('st-live-action').value;
-        if (act) applyAction(act, state.liveRole);
-    }
-
-    function finishLive() {
-        state.liveBusy = false;
-        if (state.typeTimer) { clearTimeout(state.typeTimer); state.typeTimer = null; }
-        $('st-live-say').disabled = false;
-        $('st-live-stop').disabled = true;
-        setHint('即时台词模式');
-    }
-
-    function liveStop() {
-        state.seq++;
-        finishLive();
-        stopVoices();
-        liveMsg('已停止');
     }
 
 
@@ -2045,7 +1813,6 @@
     function setMode(mode) {
         var fromEdit = state.mode === 'edit';
         var fromPlay = state.mode === 'play';
-        if (mode === 'edit' && state.liveOpen) closeLive();
         // 离开编辑态：停掉预览镜像的 rAF，别在播放时持续 drawImage
         if (mode !== 'edit' && wb.pvRaf) { cancelAnimationFrame(wb.pvRaf); wb.pvRaf = 0; }
         if (mode !== 'edit' && wb.pvTimer) { clearInterval(wb.pvTimer); wb.pvTimer = 0; wb.pvPlaying = false; }
@@ -2089,7 +1856,6 @@
             /* 剧本有改动，或从编辑页切过来（换了句/首次进入）：
                走一次完整开播，落点由 startAt 决定。 */
             state.stale = false;
-            refreshLiveRoles();
             primeStageForIntro(startAt);   // 动画期间先看到新剧本、起始句的完整场景
             state.introPending = true;
             var myIntro = beginIntro();
@@ -2116,6 +1882,8 @@
     function applyScene(scene, cast) {
         state.sel = 0;
         state.pausedPlayback = null;   // 换场：旧的暂停现场作废
+        // 日历子窗口以行级 subwin 为准：换场先按第 1 行铺好，播放中再由 renderLine 按句覆盖。
+        if (window.Subwin) window.Subwin.set(subwinAt(0));
         state.baseStage = stageOf(scene, cast);
         rebuildStaging(-1);       // 场景默认站位 + 开场显隐
         if (state.mode === 'edit') renderEditor();
@@ -2128,30 +1896,34 @@
         if (!r.ok) throw new Error('场景清单读取失败：' + r.status);
         var j = await r.json();
         state.scenes = j.scenes || [];
+        /* 顶栏下拉已移除：场景清单仍要读进 state.scenes，供 SYSTEM → OBSERVER 面板使用。 */
         var sel = $('st-scene');
-        sel.innerHTML = '';
         var menu = $('st-scene-menu');
-        menu.innerHTML = '';
+        if (sel) sel.innerHTML = '';
+        if (menu) menu.innerHTML = '';
         state.scenes.forEach(function (s) {
-            var opt = document.createElement('option');
-            opt.value = s.file;
-            opt.textContent = s.title;
-            sel.appendChild(opt);
-
-            var item = document.createElement('div');
-            item.className = 'st-scene-opt';
-            item.setAttribute('role', 'option');
-            item.dataset.file = s.file;
-            item.innerHTML = '<span class="st-scene-check"></span>' +
-                '<span class="st-scene-title"></span><span class="st-scene-file"></span>';
-            item.querySelector('.st-scene-title').textContent = s.title;
-            item.querySelector('.st-scene-file').textContent = s.file;
-            menu.appendChild(item);
+            if (sel) {
+                var opt = document.createElement('option');
+                opt.value = s.file;
+                opt.textContent = s.title;
+                sel.appendChild(opt);
+            }
+            if (menu) {
+                var item = document.createElement('div');
+                item.className = 'st-scene-opt';
+                item.setAttribute('role', 'option');
+                item.dataset.file = s.file;
+                item.innerHTML = '<span class="st-scene-check"></span>' +
+                    '<span class="st-scene-title"></span><span class="st-scene-file"></span>';
+                item.querySelector('.st-scene-title').textContent = s.title;
+                item.querySelector('.st-scene-file').textContent = s.file;
+                menu.appendChild(item);
+            }
         });
         var fromUrl = new URLSearchParams(location.search).get('scene');
         state.file = (fromUrl && state.scenes.some(function (s) { return s.file === fromUrl; }))
             ? fromUrl : (state.scenes[0] && state.scenes[0].file);
-        if (state.file) sel.value = state.file;
+        if (state.file && sel) sel.value = state.file;
         syncScenePicker();
         wbRenderScenes();
         return true;
@@ -2256,6 +2028,8 @@
         bgSrc: bgSrc,
         bgmFreeBounds: bgmFreeBounds,
         bgmAt: bgmAt,
+        subwinAt: subwinAt,
+        syncSubwin: syncSubwin,
         bgmKeyOf: bgmKeyOf,
         bgmList: bgmList,
         bgmRange: bgmRange,
@@ -2267,7 +2041,6 @@
         clearBgmSel: clearBgmSel,
         clearTimers: clearTimers,
         cloneStage: cloneStage,
-        closeLive: closeLive,
         cueOf: cueOf,
         cueRoles: cueRoles,
         currentLine: currentLine,
@@ -2295,7 +2068,6 @@
         putJson: putJson,
         reassignRoleInScript: reassignRoleInScript,
         rebuildStaging: rebuildStaging,
-        refreshLiveRoles: refreshLiveRoles,
         renderBgmDetail: renderBgmDetail,
         renderBgmTrack: renderBgmTrack,
         renderLine: renderLine,
@@ -2403,7 +2175,7 @@
             setTimeout(finishIntro, 2000);   // rAF 在后台标签页会被冻结，兜底别让首句永远不出现
             }
 
-            initLive();
+            initFullscreen();
             initAuto();
             loadBackgrounds();
             loadBgms();

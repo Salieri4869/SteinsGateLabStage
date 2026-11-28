@@ -1,0 +1,114 @@
+/* 系统菜单组件（menu.psb.m）。
+   11 张竖排精灵条逐帧只改 transform（不重绘背景），静态 off/on 素材单独一张小图。
+   scrim 只负责磨砂/压暗；点击拦截统一在 menu.js 的捕获阶段处理。 */
+#st-sysmenu {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    pointer-events: none; user-select: none;
+}
+#st-sysmenu.is-open { display: block; }
+
+/* 菜单贴画面左上角，按完整 1920×1080 画面 contain 缩放：
+   不跟 #st-hud 的 800 基准贴底（非全屏时顶部会被裁），也不居中（左边会空出黑边）。
+   scrim 仍铺满视口，行坐标保持 JSON 原值。 */
+#st-sysmenu .mn-stage {
+    position: absolute; left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    transform-origin: 0 0;
+    transform: scale(1);
+    will-change: transform;
+}
+
+/* 磨砂：只模糊菜单后面的画面，菜单行在 scrim 之上保持锐利。 */
+#st-sysmenu .mn-scrim {
+    position: absolute; inset: 0; pointer-events: none;
+    background: rgba(6, 10, 16, .36);
+    -webkit-backdrop-filter: blur(13px) saturate(.72) brightness(.88);
+    backdrop-filter: blur(13px) saturate(.72) brightness(.88);
+}
+
+#st-sysmenu .mn-row {
+    position: absolute; left: 0; width: 560px; height: 280px;
+    pointer-events: none;
+}
+#st-sysmenu .mn-viewport {
+    position: absolute; inset: 0; overflow: hidden;
+    will-change: transform; backface-visibility: hidden;
+}
+#st-sysmenu .mn-strip {
+    position: absolute; top: 0; left: 0;
+    width: 560px; height: 7000px;
+    background-repeat: no-repeat;
+    will-change: transform; backface-visibility: hidden;
+}
+
+#st-sysmenu .mn-on {
+    position: absolute; display: block; opacity: 0;
+    background-image: url(ui/menu_static.webp);
+    background-repeat: no-repeat;
+    background-size: 10920px 144px;
+    transition: opacity .12s linear;
+    pointer-events: none;
+}
+/* 文字高亮取 off/on 交替格中的 on 格。图标不叠高亮层：原作只变文字颜色。 */
+#st-sysmenu .mn-text.is-over .mn-on { opacity: 1; }
+
+#st-sysmenu .mn-hit {
+    position: absolute; display: block; padding: 0; margin: 0;
+    border: 0; background: transparent; cursor: pointer;
+    pointer-events: none;
+}
+#st-sysmenu.is-open .mn-hit { pointer-events: auto; }
+#st-sysmenu .mn-hit:focus-visible {
+    outline: 1px solid rgba(255, 206, 92, .9); outline-offset: 2px;
+}
+#st-sysmenu .mn-hit.is-pressed { filter: brightness(1.35); }
+
+/* OBSERVER 剧本选择：沿用系统菜单的斜切底座 + 白字/橙字配色 */
+#st-sysmenu .mn-scene {
+    display: none; position: absolute; left: 60px; top: 90px;
+    width: 660px; max-height: 900px; padding: 22px 26px 26px;
+    background: rgba(4, 8, 12, .9);
+    border: 1px solid rgba(196, 208, 214, .55);
+    box-shadow: 0 0 44px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(0, 0, 0, .7);
+    pointer-events: none; z-index: 2;
+    font-family: "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
+    font-weight: 500;
+}
+#st-sysmenu .mn-scene.is-open { display: block; pointer-events: auto; }
+#st-sysmenu .mn-scene-head {
+    display: flex; align-items: baseline; gap: 16px;
+    padding: 0 0 10px; margin-bottom: 14px;
+    border-bottom: 2px solid rgba(196, 208, 214, .5);
+}
+#st-sysmenu .mn-scene-mark { color: #ff9d13; font-size: 25px; letter-spacing: .16em; }
+#st-sysmenu .mn-scene-title { color: #d6dee2; font-size: 16px; letter-spacing: .12em; }
+#st-sysmenu .mn-scene-list { display: flex; flex-direction: column; gap: 6px; max-height: 690px; overflow-y: auto; }
+#st-sysmenu .mn-scene-item {
+    position: relative; display: flex; align-items: center; justify-content: space-between;
+    width: 100%; min-height: 50px; padding: 8px 16px 8px 22px;
+    border: 0; background: rgba(150, 170, 180, .1);
+    color: #e6ecef; font-family: inherit; font-weight: 500; font-size: 21px;
+    text-align: left; cursor: pointer; letter-spacing: .04em;
+}
+#st-sysmenu .mn-scene-item::before {
+    content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 5px;
+    background: rgba(196, 208, 214, .55);
+}
+#st-sysmenu .mn-scene-item:hover,
+#st-sysmenu .mn-scene-item:focus-visible {
+    outline: none; color: #10151a; background: #ff9d13;
+}
+#st-sysmenu .mn-scene-item:hover::before,
+#st-sysmenu .mn-scene-item:focus-visible::before { background: #10151a; }
+#st-sysmenu .mn-scene-item.is-active::before { background: #ff9d13; }
+#st-sysmenu .mn-scene-name { flex: 1; min-width: 0; }
+#st-sysmenu .mn-scene-file {
+    margin-left: 14px; font-size: 12px; opacity: .68; letter-spacing: 0;
+}
+#st-sysmenu .mn-scene-close {
+    display: block; margin: 18px 0 0 auto; padding: 8px 26px;
+    border: 1px solid rgba(196, 208, 214, .6);
+    background: transparent; color: #d6dee2;
+    font-family: inherit; font-weight: 500; font-size: 17px; letter-spacing: .14em; cursor: pointer;
+}
+#st-sysmenu .mn-scene-close:hover { color: #10151a; background: #ff9d13; border-color: #ff9d13; }

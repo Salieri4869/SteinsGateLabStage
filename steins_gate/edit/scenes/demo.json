@@ -11,13 +11,19 @@
       "enter": [
         "红莉栖"
       ],
-      "background": "background.jpg"
+      "background": "background.jpg",
+      "subwin": {
+        "notify": "mail"
+      }
     },
     {
       "role": "红莉栖",
       "text": "提托里面的人已经自报家门了，我不报出身份的话不是很不公平吗",
       "action": "微笑",
-      "voice": "resg06_16_krs0006.xwma.opus"
+      "voice": "resg06_16_krs0006.xwma.opus",
+      "subwin": {
+        "notify": "mail"
+      }
     },
     {
       "role": "铃羽",
@@ -38,6 +44,9 @@
         "铃羽": {
           "x": 0
         }
+      },
+      "subwin": {
+        "notify": "recv"
       }
     },
     {
@@ -57,6 +66,9 @@
         "铃羽": {
           "x": 0
         }
+      },
+      "subwin": {
+        "notify": "mail"
       }
     },
     {

@@ -98,30 +98,39 @@
         html.st-loading-actors #canvas { visibility: hidden; }
 
         #st-bar {
-            position: fixed; top: 0; left: 0; right: 0; height: 48px; z-index: 10;
-            display: flex; align-items: center; gap: 12px; padding: 0 18px;
+            position: fixed; top: 0; left: 0; right: 0; height: 40px; z-index: 10;
+            display: flex; align-items: center; gap: 12px; padding: 0 14px;
             background: rgba(5, 15, 20, .92); backdrop-filter: blur(10px);
             border-bottom: 1px solid var(--hairline);
         }
+        .st-bar-left, .st-bar-center, .st-bar-right {
+            display: flex; align-items: center; gap: 10px; min-width: 0;
+        }
+        .st-bar-left { flex: none; }
+        .st-bar-center { flex: 0 1 260px; }
+        .st-bar-right { flex: none; margin-left: auto; gap: 8px; }
         .st-home {
-            color: var(--text-3); text-decoration: none; cursor: pointer; white-space: nowrap;
-            border: 1px solid var(--hairline); border-radius: var(--radius-sm);
-            padding: 6px 13px; font-size: var(--fs-base);
+            display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+            height: 28px; flex: none; padding: 0 9px; font-size: 12px;
+            color: var(--text-3); text-decoration: none; cursor: pointer;
+            border: 1px solid var(--hairline); border-radius: 4px;
             transition: color .15s, background .15s, border-color .15s;
         }
+        .st-home svg { width: 13px; height: 13px; }
         .st-home:hover { color: var(--surface-0); background: var(--accent); border-color: var(--accent); }
         .st-brand { font: 500 10px/1.6 ui-monospace, Consolas, monospace; letter-spacing: .28em; color: var(--accent); }
         .st-scene-picker { position: relative; }
         .st-scene-trigger {
-            display: flex; align-items: center; justify-content: space-between; gap: 10px;
-            min-width: 200px; max-width: 320px; padding: 6px 10px; cursor: pointer;
-            background: rgba(255,255,255,.06); color: var(--text-1); font-family: inherit; font-size: var(--fs-base);
-            border: 1px solid var(--accent-line); border-radius: var(--radius-sm);
+            display: flex; align-items: center; gap: 7px;
+            width: 190px; min-width: 0; max-width: 220px; height: 30px; padding: 0 9px; cursor: pointer;
+            background: rgba(255,255,255,.06); color: var(--text-1); font-family: inherit; font-size: 12px;
+            border: 1px solid var(--accent-line); border-radius: 4px;
             transition: border-color .15s, background .15s;
         }
         .st-scene-trigger:hover { border-color: var(--accent); background: rgba(255,255,255,.1); }
         .st-scene-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-        .st-scene-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .st-scene-ico { flex: none; width: 12px; height: 12px; color: var(--accent); }
+        .st-scene-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
         .st-scene-caret {
             flex: none; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
             border-top: 5px solid rgba(230,241,239,.6); transition: transform .15s ease;
@@ -148,14 +157,14 @@
             flex: none; margin-left: auto; padding-left: 10px;
             font: 500 10px/1 ui-monospace, Consolas, monospace; color: rgba(230,241,239,.38);
         }
-        #st-msg { font-size: var(--fs-base); color: var(--gold); }
+        #st-msg { min-width: 0; font-size: 12px; color: var(--gold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #st-msg:empty { display: none; }
-        #st-progress { font: 500 var(--fs-sm)/1 ui-monospace, Consolas, monospace; color: var(--text-3); }
+        #st-progress { font: 500 11px/1 ui-monospace, Consolas, monospace; color: var(--text-3); white-space: nowrap; }
         .st-spacer { flex: 1; }
         /* 播放/编辑只作并排布局，不再画整组外框：
            否则「编辑 ↗」会被组外框 + 自身边框夹成双层框，和顶栏其它按钮明显不齐。 */
         .st-modes {
-            display: flex; align-items: center; gap: 2px;
+            display: flex; align-items: center; gap: 8px;
         }
         .st-modes button, #st-save, #st-add-line, #st-full {
             background: transparent; color: var(--text-3); cursor: pointer;
@@ -163,10 +172,10 @@
             padding: 6px 14px; font-size: var(--fs-base); font-family: inherit;
             transition: color .15s, background .15s, border-color .15s;
         }
-        .st-modes button { border-color: transparent; padding: 5px 16px; border-radius: 4px; }
+        .st-modes button { border-color: var(--hairline); }
         .st-modes button:hover { color: var(--text-1); background: var(--accent-soft); }
         .st-modes button:focus-visible, #st-save:focus-visible, #st-add-line:focus-visible,
-        #st-full:focus-visible, #st-live-toggle:focus-visible {
+        #st-full:focus-visible {
             outline: 2px solid var(--accent); outline-offset: 1px;
         }
         #st-save:hover:not([disabled]), #st-full:hover:not([disabled]) { color: var(--accent); border-color: var(--accent-line); }
@@ -214,11 +223,22 @@
         html[data-mode="edit"] #st-hud { display: none; }
         #st-hud .hud-ly { position: absolute; }
         #st-hud .hud-ly img { display: block; width: 100%; height: 100%; }
+        /* MSGWIN 七帧竖排成一张 1920×2030 精灵图，帧高 290：
+           0 win(灰渐变) / 1 lines(白线) / 2 dark / 3 dim / 4 mid / 5·6 历史帧。
+           竖排让 X 始终为 0，取帧只改 Y = 帧号 × -290px。 */
         #st-hud .hud-win,
         #st-hud .hud-lines,
         #st-hud .hud-dark,
         #st-hud .hud-dim,
-        #st-hud .hud-mid { left: 0; top: 790px; width: 1920px; height: 290px; }
+        #st-hud .hud-mid {
+            left: 0; top: 790px; width: 1920px; height: 290px;
+            background: url(ui/msgwin_sheet.webp) no-repeat 0 0 / 1920px 2030px;
+        }
+        #st-hud .hud-win { background-position: 0 0; }
+        #st-hud .hud-lines { background-position: 0 -290px; }
+        #st-hud .hud-dark { background-position: 0 -580px; }
+        #st-hud .hud-dim { background-position: 0 -870px; }
+        #st-hud .hud-mid { background-position: 0 -1160px; }
         #st-hud .hud-lines, #st-hud .hud-dark,
         #st-hud .hud-dim, #st-hud .hud-mid { opacity: 0; }
         #st-hud .hud-deco  { left: 434px; top: 1022px; width: 1053px; height: 56px; opacity: 0; }
@@ -234,20 +254,24 @@
            这层保留 DOM 仅为兼容旧探针/调试，永远隐藏，不参与画面。 */
         #st-hud .hud-name-w { top: 1014px; height: 59px; opacity: 0; }
 
-        /* 名牌 mesh 形变层：纯白六边形，由脚本逐帧写 clip-path 顶点，
-           从正菱形展开成横向纺锤再压平成六边形（对应原作 name 的 mesh 顶点动画），
-           展开完成淡出、交接给下面带网点纹理的正式底板。
-           几何用 1920 画布像素写死，left/width 由 layoutPlate 按档位摆；
-           top=1014 与底板一致，clip-path 顶点垂直方向在 59px 盒内计算。 */
+        /* 名牌白闪层：原作 #mask/2..5 的真实阈值结果已烘焙成白色精灵帧，
+           直接画在元素背景上，逐帧只改 background-position。
+           不用 mask-image：实测每帧改遮罩会让浏览器重绘整张精灵图（80–150ms/帧），
+           明显卡顿；背景位移只重绘元素自身那一小块。
+           精灵图 650×10140（4 档 × 39 帧 × 65px），60fps 采样原作擦入曲线：
+           0–38 帧展开、38–58 帧淡出交接底板（时间点等同 30fps 的 t=19/29）。
+           left/width/top 由 layoutPlate 按档位摆（白闪 65 高、底板 59 高，中心重合，top=1011）。 */
         #st-hud .hud-name-morph {
-            top: 1014px; height: 59px;
-            background: #fff;
-            will-change: clip-path, opacity;
+            top: 1011px; height: 65px;
+            background: url(ui/nameplate_morph.webp) no-repeat 0 0 / 650px 10140px;
+            will-change: background-position, opacity;
         }
 
-        /* 名牌两侧装饰线（原素材：tex#000 的 main/名前飾り 1053×56）分两个状态：
-             idle   deco_dim.webp —— 游戏原样的那层淡描边（黑填充 α≈36 / 白描边 α≈120），AUTO 关掉时的常态，完全静止
-             auto   deco_lit.webp —— 描边推到纯白、填充压成黑块（游戏里 名前飾りwhite 那一层），只在 AUTO 打开时出现
+        /* 名牌两侧装饰线（原素材：tex#000 的 main/名前飾り 1053×56）分两个状态，
+           竖排合成为 deco_sheet.webp（1053×168）：y=0 暗态、y=-56 亮态、y=-112 namedeco：
+             idle   暗态 —— 游戏原样的那层淡描边（黑填充 α≈36 / 白描边 α≈120），AUTO 关掉时的常态，完全静止
+             auto   亮态 —— 描边推到纯白、填充压成黑块（游戏里 名前飾りwhite 那一层），只在 AUTO 打开时出现
+           竖排保持 X 不变，现有的左右半片 clip-path / mask-position 逻辑不用改。
            节奏按参考录像（2560×1440 / 60fps，一个周期正好 90 帧 = 1.500s）逐帧量出：
              前沿贴着左边缘出现 → 29.7 帧（0.495s）扫到右边缘、整条点亮 → 停 1 帧 →
              同一条前沿再从左边扫一次，27.9 帧（0.465s）把光从左往右收走 → 剩 31.6 帧（0.527s）全暗。
@@ -256,15 +280,18 @@
              ② 下排居中短线（43–56 行，x 294–758，左右镜像、对称相关 1.000）——
                 它是「从中间往两头张开、再收回」，见下面的 sg-chg-l / sg-chg-r。
            性能要点：高亮层 = 「动画 mask 的 wrapper」+「静态底图」。mask 动画写在带 filter 的元素上
-           会让 filter 每帧重算（实测 12.1ms/帧）；亮/暗两态直接烘焙成两张图，连 filter 都省了。 */
-        .hud-deco .deco-base { display: block; width: 1053px; height: 56px; }
+           会让 filter 每帧重算（实测 12.1ms/帧）；亮/暗两态直接烘焙成两帧，连 filter 都省了。 */
+        .hud-deco .deco-base {
+            display: block; width: 1053px; height: 56px;
+            background: url(ui/deco_sheet.webp) no-repeat 0 0 / 1053px 168px;
+        }
         /* 开屏专用亮起层（MSGWIN.deco_show）：白亮装饰线从正中向两边擦入、再淡出，
            只播一次。独立于 .deco-lit/.deco-chg 的 AUTO 循环扫光，不受 .is-auto 控制。
            mask 的展开进度与 opacity 由 sg-dialog.js 的 paintDecoShow 逐帧写。 */
         .hud-deco .deco-intro {
             position: absolute; left: 0; top: 0; width: 1053px; height: 56px;
             display: block; pointer-events: none; opacity: 0; visibility: hidden;
-            background: url(ui/deco_lit.webp) no-repeat 0 0 / 1053px 56px;
+            background: url(ui/deco_sheet.webp) no-repeat 0 -56px / 1053px 168px;
             will-change: mask-image, opacity;
         }
         .hud-deco .deco-lit {
@@ -288,7 +315,7 @@
         .hud-deco.is-auto .deco-lit { display: block; }
         .hud-deco .deco-lit i {
             position: absolute; inset: 0; display: block;
-            background: url(ui/deco_lit.webp) no-repeat 0 0 / 1053px 56px;
+            background: url(ui/deco_sheet.webp) no-repeat 0 -56px / 1053px 168px;
             /* 只让 0–43 行跟着左→右扫光；43 行以下那条居中短线归 .deco-chg 管，
                否则它会被这条竖直前沿一起拖成从左往右（原片里它明明是从中间张开） */
             clip-path: inset(0 0 13px 0);
@@ -308,12 +335,12 @@
         .hud-deco.is-auto .deco-chg { display: block; }
         .hud-deco .deco-chg span {
             position: absolute; top: 0; width: 526.5px; height: 56px; display: block;
-            background: url(ui/deco_lit.webp) no-repeat 0 0;
+            background: url(ui/deco_sheet.webp) no-repeat 0 -56px / 1053px 168px;
             clip-path: inset(43px 0 0 100%);
             animation: sg-lit-in .18s ease both, sg-chg-l 1.5s linear infinite;
         }
         .hud-deco .deco-chg .chg-r {
-            left: 526.5px; background-position: -526.5px 0;
+            left: 526.5px; background-position: -526.5px -56px;
             clip-path: inset(43px 100% 0 0);
             animation: sg-lit-in .18s ease both, sg-chg-r 1.5s linear infinite;
         }
@@ -380,15 +407,6 @@
             white-space: pre-wrap;
         }
 
-        #st-hint {
-            position: absolute; left: 132px; top: 1022px; height: 30px; line-height: 30px;
-            font-size: 15px; color: rgba(212,232,229,.55); white-space: nowrap;
-        }
-        #st-hint:empty { display: none; }
-        /* 开场那 1 秒里窗还没铺好，AUTO 与提示先不露面 */
-        #st-hud #st-auto, #st-hud #st-hint { transition: opacity .3s ease, filter .15s ease; }
-        #st-hud:not(.is-open) #st-auto, #st-hud:not(.is-open) #st-hint { opacity: 0; }
-
         /* 右下角闪烁的 ▼：台词打完才出现，仿游戏里的等待标记 */
         #st-caret {
             position: absolute; left: 1568px; top: 1024px; width: 0; height: 0;
@@ -420,26 +438,58 @@
             #st-gear { animation: none; }
         }
 
-        /* 对话框左下角的 AUTO：直接用 main.psb.m 里 pcbt_auto_* 的四态切片
-           （off 白字未开 / on 橙字已开 / no 灰暗不可用 / stop 灰字红斜杠）。
-           原生 92×32，与游戏同尺，不再用 CSS 描边画。 */
-        #st-auto {
-            position: absolute; left: 26px; top: 1022px; width: 92px; height: 32px;
-            padding: 0; border: 0; background: none; cursor: pointer; pointer-events: auto;
-            transition: filter .15s ease;
+        /* ---- PC 操作提示标签（SYSTEM / AUTO / SKIP / PHONE）----
+           素材：main.psb.m 的 pcbt_* 四态切片，同类四态横排合成一张雪碧图
+           （顺序 no→off→on→stop），原尺寸透明底。坐标照 MSGWIN.pc_button 的
+           switch 层：中心原点 (cx,cy) → 页面左上 = (960+cx-originX, 540+cy-originY)。
+           三态按实机参考图：默认 no 灰字、悬停 off 白字、激活 on 橙字。
+           旧的独立 AUTO 按钮已删除，#st-auto 钩子移到这里的 AUTO 标签上；
+           其余三个标签先做成可点（短暂橙字反馈），不推进剧本。 */
+        #st-pcbt { position: absolute; inset: 0; pointer-events: none; transition: opacity .3s ease; }
+        #st-pcbt .pcbt {
+            position: absolute; display: block; height: 32px;
+            padding: 0; border: 0; background-color: transparent;
+            background-repeat: no-repeat; image-rendering: auto;
+            pointer-events: auto; cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: filter .12s ease;   /* 雪碧图切帧即时，只有亮度过渡 */
         }
-        #st-auto img { display: block; width: 92px; height: 32px; -webkit-user-drag: none; }
-        #st-auto:hover { filter: brightness(1.2); }
-        #st-auto:active { filter: brightness(.92); }
-        #st-auto[disabled] { cursor: default; filter: grayscale(.4) brightness(.8); }
+        /* 默认 no 态（灰字）；逐类定宽 + background-position 切帧 */
+        #st-pcbt .pcbt-system { left: 10px;   top: 1037px; width: 122px;
+            background-image: url(ui/pcbt_system.webp); background-position: 0 0; }
+        #st-pcbt .pcbt-auto   { left: 142px;  top: 1037px; width: 92px;
+            background-image: url(ui/pcbt_auto.webp);   background-position: 0 0; }
+        #st-pcbt .pcbt-skip   { left: 240px;  top: 1037px; width: 92px;
+            background-image: url(ui/pcbt_skip.webp);   background-position: 0 0; }
+        #st-pcbt .pcbt-phone  { left: 1801px; top: 1037px; width: 107px;
+            background-image: url(ui/pcbt_phone.webp);  background-position: 0 0; }
+        /* 悬停 → off 白字（原作「可点击」态） */
+        #st-pcbt .pcbt-system:hover { background-position: -122px 0; }
+        #st-pcbt .pcbt-auto:hover   { background-position: -92px 0; }
+        #st-pcbt .pcbt-skip:hover   { background-position: -92px 0; }
+        #st-pcbt .pcbt-phone:hover  { background-position: -107px 0; }
+        /* 激活 → on 橙字：AUTO 由 setAuto 切 is-on；其余标签点击后短暂 is-pressed 作反馈 */
+        #st-pcbt .pcbt-system.is-on, #st-pcbt .pcbt-system.is-pressed { background-position: -244px 0; }
+        #st-pcbt .pcbt-auto.is-on,   #st-pcbt .pcbt-auto.is-pressed   { background-position: -184px 0; }
+        #st-pcbt .pcbt-skip.is-on,   #st-pcbt .pcbt-skip.is-pressed   { background-position: -184px 0; }
+        #st-pcbt .pcbt-phone.is-on,  #st-pcbt .pcbt-phone.is-pressed  { background-position: -214px 0; }
+        /* 已激活的标签悬停保持橙字、只提亮；按下瞬间压暗；键盘焦点可见 */
+        #st-pcbt .pcbt.is-on:hover, #st-pcbt .pcbt.is-pressed:hover { filter: brightness(1.18); }
+        #st-pcbt .pcbt:active { filter: brightness(.9); }
+        #st-pcbt .pcbt:focus-visible { outline: 2px solid rgba(120,214,196,.75); outline-offset: 2px; }
+        /* 窗口没铺好前先不露面、也不接点击 */
+        #st-hud:not(.is-open) #st-pcbt { opacity: 0; }
+        #st-hud:not(.is-open) #st-pcbt .pcbt { pointer-events: none; }
 
-        /* 对话框右侧的自动播放提示牌：台座(149×69) + »AUTO 文字(107×24)，两件都是图集原图。
-           位置照游戏：贴着对话框右边缘（right:0），纵向落在对话框高度的 3/4 线上
-           —— 窗 top 790 + 290×0.75 = 1007.5，牌高 69，故 top = 1007.5-34.5 ≈ 973。
-           动效照 AUTOSKIP 的 auto_show：15 帧（0.5s）从屏幕右缘外水平滑入 149px，
+        /* 对话框右侧的 »AUTO 提示牌：台座(149×69) + 文字(107×24)，两件都是 tex#001 原图。
+           位置严格按 main.psb.m.json：AUTOSKIP.auto_normal 的 base 中心坐标 (886,454)，
+           台座 origin (75,47) → 左上 = (960+886-75, 540+454-47) = (1771,947)，
+           即 right:0 / top:947（此前按目测写的 973 偏高 26px，已修正）。
+           文字中心 (896,441)、origin (54,12) → 相对台座左上 (31,22)。
+           动效照 auto_show：15 帧从 coord x=1035 滑到 886，正好一个台座宽 149px，
            所以需要一个 overflow:hidden 的槽把滑出屏幕的那半截裁掉。 */
         #st-autoslot {
-            position: absolute; right: 0; top: 973px; width: 149px; height: 69px;
+            position: absolute; right: 0; top: 947px; width: 149px; height: 69px;
             overflow: hidden; pointer-events: none;
         }
         #st-autoplate {
@@ -457,70 +507,11 @@
         /* 开场窗口还没铺完时先不露面 */
         #st-hud:not(.is-open) #st-autoplate,
         #st-hud:not(.is-open) #st-autoplate.is-on { opacity: 0; }
-        #st-live-toggle { padding: 5px 12px; font-size: 12px; cursor: pointer; color: #9fb8b4;
-            background: transparent; border: 1px solid rgba(233,185,110,.4); border-radius: 4px; }
-        #st-live-toggle:hover, #st-live-toggle.is-active { color: #07141a; background: #e9b96e; border-color: #e9b96e; }
 
-        /* 顶栏四个操作按钮统一尺寸：即时台词 / 播放 / 编辑 / 全屏。
-           统一 32px 高、13px/400 字重、4px 圆角，各自配色语义保持不变。 */
-        #st-live-toggle, .st-modes button, .st-goto-edit, #st-full {
-            box-sizing: border-box;
-            height: 32px;
-            padding: 0 14px;
-            font-size: 13px;
-            font-weight: 400;
-            line-height: 1;
-            border-radius: 4px;
-        }
+        /* 左上角日历子窗口已拆为独立组件：subwin.css + subwin.js */
 
-        /* ---- 即时台词面板 ---- */
-        #st-live {
-            position: fixed; top: 56px; right: 18px; z-index: 8; width: 340px;
-            max-height: calc(100vh - 68px); overflow-y: auto; padding: 14px;
-            background: rgba(6, 18, 24, .96); border: 1px solid rgba(233,185,110,.35);
-            border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.5);
-        }
-        #st-live[hidden] { display: none; }
-        html[data-mode="edit"] #st-live { display: none; }
-        .st-live-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-        .st-live-head h2 { font-size: 13px; font-weight: 500; color: #e9b96e; }
-        .st-live-head h2 small { font: 400 9px/1 ui-monospace, monospace; letter-spacing: .16em; opacity: .6; }
-        #st-live-close { background: none; border: none; color: #9fb8b4; font-size: 20px; line-height: 1; cursor: pointer; }
-        #st-live .st-field { display: block; margin-bottom: 10px; font-size: 11px; color: rgba(230,241,239,.6); }
-        #st-live .st-field > span { display: block; margin-bottom: 4px; }
-        #st-live select, #st-live textarea {
-            width: 100%; background: rgba(0,0,0,.35); color: #dceae7;
-            border: 1px solid rgba(233,185,110,.25); border-radius: 4px;
-            padding: 6px 8px; font-size: 12px; font-family: inherit;
-        }
-        #st-live textarea { resize: vertical; line-height: 1.6; }
-        /* 原生的选择文件框与暗色主题格格不入，隐藏后用 label 触发，旁边回显文件名 */
-        #st-live-file { display: none; }
-        .st-file-row { display: flex; align-items: center; gap: 8px; }
-        .st-file-btn {
-            flex: none; padding: 5px 4px; font-size: 11px; cursor: pointer; white-space: nowrap;
-            color: #63d6c4; background: rgba(99,214,196,.08);
-            border: 1px solid rgba(99,214,196,.5); border-radius: 4px;
-        }
-        .st-file-btn:hover { color: #07141a; background: #63d6c4; border-color: #63d6c4; }
-        .st-file-name {
-            flex: 1; min-width: 0; font-size: 11px; color: rgba(230,241,239,.55);
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }
-        .st-file-name.has-file { color: #dceae7; }
-        #st-live-src .st-live-src-title { color: #e9b96e; font-size: 11px; margin: 12px 0 6px; }
-        .st-live-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
-        .st-live-tabs button { flex: 1; padding: 5px 4px; font-size: 11px; cursor: pointer;
-            color: #9fb8b4; background: transparent; border: 1px solid rgba(233,185,110,.25); border-radius: 4px; }
-        .st-live-tabs button.is-active { color: #07141a; background: #e9b96e; border-color: #e9b96e; }
-        [data-src-pane] > select, [data-src-pane] > button { margin-top: 4px; }
-        [data-src-pane] > button { padding: 4px 10px; font-size: 11px; cursor: pointer;
-            color: #9fb8b4; background: transparent; border: 1px solid rgba(var(--gold-rgb), .25); border-radius: 4px; }
-        .st-live-ops { display: flex; gap: 6px; margin-top: 12px; }
-        .st-live-ops button { flex: 1; padding: 7px; font-size: 12px; cursor: pointer;
-            color: #9fb8b4; background: transparent; border: 1px solid rgba(var(--gold-rgb), .35); border-radius: 4px; }
-        .st-live-ops button.is-primary { color: var(--surface-0); background: var(--gold); border-color: var(--gold); font-weight: 600; }
-        #st-live-stop[disabled], #st-live-say[disabled] { opacity: .45; cursor: default; }
+        /* 即时台词 LIVE 已迁到研究所页（../stage/），此处不再保留拉手/面板样式。
+           .st-live-note 仍被编辑器的说明文案复用，故保留其基础样式。 */
         .st-live-note { font-size: 10.5px; line-height: 1.5; color: rgba(230,241,239,.5); margin-top: 6px; min-height: 1em; }
         .st-live-note.err { color: var(--gold); }
 
@@ -529,7 +520,7 @@
            布局用 CSS 变量驱动，分割条拖动时由 JS 改变量即可，不改任何 DOM 钩子。
            --nav-w / --inspector-w / --preview-h 存 localStorage，下次打开保持。 */
         #st-editor {
-            position: fixed; top: 48px; bottom: 0; left: 0; right: 0; z-index: 6;
+            position: fixed; top: 40px; bottom: 0; left: 0; right: 0; z-index: 6;
             display: none;
             background: var(--surface-0);
             --nav-w: 320px;

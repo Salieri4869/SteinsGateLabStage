@@ -1355,6 +1355,8 @@ async function start() {
         return;
     }
     const player = ctx.player;
+    // 即时台词组件（live.js）需要把口型打到当前立绘：只暴露只读 player，不额外建实例。
+    window.SGPlayer = player;
 
     console.log('armPose:', ctx.armPose, '| armGL:', window.ArmPoseGL && window.ArmPoseGL.info());
     console.log('charaBounds:', player.charaBounds);

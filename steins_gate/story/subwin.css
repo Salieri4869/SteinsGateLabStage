@@ -1,0 +1,79 @@
+/* 左上角日历子窗口组件：与 subwin.js 同目录。
+   素材只有一张 ui/subwindow.webp（subwindow.psb.m/tex-texture.png 重排后无损转码），
+   每个切片靠 background-position 取图；取帧数据已紧凑内联在 subwin.js。
+   0026 subwipemask 是遮罩，永远不当可见层。 */
+#st-subwin {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 404px;
+    height: 156px;
+    pointer-events: none;
+    /* 矮视口下与顶栏之间留的空隙；subwin.js 读取它计算下移量。 */
+    --sw-clearance: 8px;
+    /* 原作左上角日历常驻，不跟对话框的 is-open 展开态绑定。 */
+    opacity: 1;
+    /* 整窗滑动：recv_show 16 帧 / recv_close 15 帧，由 subwin.js 写入 --sw-slide-dur。
+       首帧为 0s 直接落位，切通知态时才带过渡。 */
+    transition: left var(--sw-slide-dur, 0s) cubic-bezier(.22,.7,.3,1);
+}
+#st-subwin[style*="display: none"] { opacity: 0; }
+#st-subwin .sw-part {
+    position: absolute;
+    display: block;
+    background-image: url(ui/subwindow.webp);
+    background-repeat: no-repeat;
+    background-color: transparent;
+}
+/* 来信态圆形头像里的大信封（0000）：灰度近似原作着色，静止时按 JSON 的 60 帧呼吸。
+   切到 / 切离来短信时按 mail_recv_show / mail_recv_close 播放弹出收回。 */
+#st-subwin .sw-recv {
+    filter: grayscale(1) contrast(1.9) brightness(1.5);
+    transform-origin: center center;
+    animation: sw-recv-breathe var(--sw-recv-dur, 2s) ease-in-out infinite;
+}
+@keyframes sw-recv-breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(var(--sw-recv-scale, 1.15)); }
+}
+/* 弹出：scale 0→峰值→1，旋转从 -90° 过冲 20° 回 0°（mail_recv_show，t15 到峰值） */
+#st-subwin .sw-recv.is-anim-in {
+    animation: sw-recv-in var(--sw-anim-dur, .733s) cubic-bezier(.2,.85,.3,1) both;
+}
+@keyframes sw-recv-in {
+    0%   { transform: rotate(var(--sw-anim-angle, -90deg)) scale(0); opacity: 0; }
+    68%  { transform: rotate(20deg) scale(var(--sw-recv-scale, 1.15)); opacity: 1; }
+    100% { transform: rotate(0deg) scale(1); opacity: 1; }
+}
+/* 收回：scale 1→0，旋转 0°→90°（mail_recv_close） */
+#st-subwin .sw-recv.is-anim-out {
+    animation: sw-recv-out var(--sw-anim-dur, .533s) cubic-bezier(.5,0,.8,.4) both;
+}
+@keyframes sw-recv-out {
+    0%   { transform: rotate(0deg) scale(1); opacity: 1; }
+    100% { transform: rotate(var(--sw-anim-angle, 90deg)) scale(0); opacity: 0; }
+}
+/* 来电小图标：phone_call_show 0→peak→1（20f）、phone_call_close 1→0（15f），不带旋转。 */
+#st-subwin .sw-phone {
+    transform-origin: center center;
+}
+#st-subwin .sw-phone.is-anim-in {
+    animation: sw-phone-in var(--sw-anim-dur, .667s) cubic-bezier(.2,.85,.3,1) both;
+}
+@keyframes sw-phone-in {
+    0%   { transform: scale(0); opacity: 0; }
+    68%  { transform: scale(var(--sw-phone-peak, 1.15)); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+#st-subwin .sw-phone.is-anim-out {
+    animation: sw-phone-out var(--sw-anim-dur, .5s) cubic-bezier(.5,0,.8,.4) both;
+}
+@keyframes sw-phone-out {
+    0%   { transform: scale(1); opacity: 1; }
+    100% { transform: scale(0); opacity: 0; }
+}
+#st-subwin .sw-recv[hidden],
+#st-subwin .sw-month-tens[hidden],
+#st-subwin .sw-day-tens[hidden],
+#st-subwin .sw-mail[hidden],
+#st-subwin .sw-phone[hidden] { display: none; }

@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>剧情模式 · Amadeus Demo</title>
     <link rel="stylesheet" href="story.css">
+    <link rel="stylesheet" href="subwin.css">
+    <link rel="stylesheet" href="menu.css">
 
     <!-- 加载顺序是 SDK 硬契约，与 steins_gate/index.html 保持一致 -->
     <script src="../../common/gl_arm_pose.js"></script>
@@ -22,6 +24,8 @@
     <!-- 时间轴纯算法（无 DOM）：story.js 与 edit.js 共用，先于两者加载 -->
     <script src="../edit/timeline-core.js"></script>
     <script src="story.js"></script>
+    <script src="subwin.js"></script>
+    <script src="menu.js"></script>
     <script src="../edit/edit.js"></script>
 </head>
 <body onload="EmoteDriver_Launch(startStory)">
@@ -39,32 +43,8 @@
         <div id="st-status">正在构筑世界线…</div>
     </div>
 
-    <header id="st-bar">
-        <a class="st-home" href="../../index.html" title="返回主页">← 主页</a>
-        <span class="st-brand">STORY MODE</span>
-        <div class="st-scene-picker" id="st-scene-picker">
-            <button type="button" class="st-scene-trigger" id="st-scene-trigger"
-                    aria-haspopup="listbox" aria-expanded="false" aria-label="选择场景">
-                <span class="st-scene-label" id="st-scene-label"></span>
-                <span class="st-scene-caret" aria-hidden="true"></span>
-            </button>
-            <div class="st-scene-menu" id="st-scene-menu" role="listbox" hidden></div>
-            <select id="st-scene" aria-label="场景" hidden></select>
-        </div>
-        <span id="st-msg"></span>
-        <span class="st-spacer"></span>
-        <span id="st-progress"></span>
-        <button type="button" id="st-live-toggle" title="打开即时台词：输入文字或选择音频，让角色开口">即时台词</button>
-        <div class="st-modes">
-            <button type="button" data-mode="play" class="is-active">播放</button>
-            <!-- 编辑入口已拆到独立页面（../edit/），两页 wasm 内存互不干扰。
-                 保留这个按钮但隐藏，仅供既有验收脚本触发原地编辑；正常用户走上面的「编辑 ↗」。 -->
-            <button type="button" data-mode="edit" hidden aria-hidden="true" tabindex="-1"></button>
-            <a class="st-goto-edit" href="../edit/index.html" title="打开独立编辑工作台，不影响当前剧情预览">编辑 ↗</a>
-        </div>
-        <button type="button" id="st-full" title="全屏：隐藏浏览器边框与顶栏，只留画面">全屏</button>
-    </header>
-
+    <!-- 原顶部控制栏已移除：主页/编辑/全屏/剧本选择分别收进 SYSTEM 菜单的
+         RETURN TITLE / CONFIG / FULL SCREEN / OBSERVER 项。全屏时只留退出提示。 -->
     <button type="button" id="st-full-exit" title="退出全屏（Esc）">全屏中 · Esc</button>
 
     <canvas id="canvas"></canvas>
@@ -72,18 +52,17 @@
     <!-- 对话框：MSGWIN 底色 / 电路线闪层 / 名牌装饰线 + 名牌底板 + 白闪层
          坐标全部照抄游戏（1920×1080），缩放交给 #st-hud 的 transform -->
     <div id="st-hud">
-        <div class="hud-ly hud-win" data-hud="win"><img src="ui/msgwin_2_grad.webp" alt=""></div>
-        <div class="hud-ly hud-dark" data-hud="dark"><img src="ui/msgwin_3_dark.webp" alt=""></div>
-        <div class="hud-ly hud-dim" data-hud="dim"><img src="ui/msgwin_4_dim.webp" alt=""></div>
-        <div class="hud-ly hud-mid" data-hud="mid"><img src="ui/msgwin_5_mid.webp" alt=""></div>
-        <div class="hud-ly hud-lines" data-hud="lines"><img src="ui/msgwin_1_lines.webp" alt=""></div>
+        <div class="hud-ly hud-win" data-hud="win"></div>
+        <div class="hud-ly hud-dark" data-hud="dark"></div>
+        <div class="hud-ly hud-dim" data-hud="dim"></div>
+        <div class="hud-ly hud-mid" data-hud="mid"></div>
+        <div class="hud-ly hud-lines" data-hud="lines"></div>
         <div class="hud-ly hud-deco" data-hud="deco"></div>
         <div class="hud-ly hud-name-w" data-hud="name-white"></div>
         <div class="hud-ly hud-name" data-hud="name"></div>
-        <div class="hud-ly hud-name-morph" data-hud="name-morph"></div>
         <div id="st-name"></div>
+        <div class="hud-ly hud-name-morph" data-hud="name-morph"></div>
         <div id="st-text"><span id="st-text-txt"></span><span id="st-gear" class="is-off" aria-hidden="true"></span></div>
-        <span id="st-hint"></span>
         <div id="st-caret" class="is-off"></div>
         <div id="st-autoslot" aria-hidden="true">
             <div id="st-autoplate">
@@ -91,51 +70,29 @@
                 <img class="ap-text" src="ui/auto_text.webp" alt="">
             </div>
         </div>
-        <button type="button" id="st-auto" aria-pressed="false"
-                title="AUTO：等这句的语音放完自动翻页；点击画面可立即继续">
-            <img id="st-auto-img" src="ui/auto_off.webp" alt="AUTO">
-        </button>
+        <!-- 左上角日历子窗口：独立组件，图层由 subwin.js 注入。 -->
+        <div id="st-subwin" aria-hidden="true"></div>
+        <!-- PC 操作提示标签：照 main.psb.m 的 MSGWIN.pc_button 原作坐标摆放。
+             四类各一张四态雪碧图（no/off/on/stop 横排），与逐帧画面同尺（1920×1080）。
+             默认灰字、悬停白字、激活橙字；AUTO 沿用 #st-auto 钩子承载自动播放开关，
+             其余三个先做成可点（给原作橙字反馈），功能接入前不推进剧本。 -->
+        <div id="st-pcbt">
+            <button type="button" class="pcbt pcbt-system" data-key="system"
+                    title="SYSTEM：打开/关闭系统菜单" aria-pressed="false"></button>
+            <button type="button" class="pcbt pcbt-auto" id="st-auto" data-key="auto"
+                    title="AUTO：等这句的语音放完自动翻页；点击画面可立即继续" aria-pressed="false"></button>
+            <button type="button" class="pcbt pcbt-skip" data-key="skip"
+                    title="SKIP：跳过已读（暂未接入）" aria-pressed="false"></button>
+            <button type="button" class="pcbt pcbt-phone" data-key="phone"
+                    title="PHONE：手机（暂未接入）" aria-pressed="false">            </button>
+        </div>
     </div>
 
-    <!-- 即时台词：不依赖剧本，输入文字 + 音频让当前角色开口 -->
-    <section id="st-live" hidden aria-label="即时台词">
-        <div class="st-live-head">
-            <h2>即时台词 <small>LIVE</small></h2>
-            <button type="button" id="st-live-close" title="关闭">×</button>
-        </div>
-        <label class="st-field"><span>角色</span><select id="st-live-role"></select></label>
-        <label class="st-field"><span>文字（打字机显示，可配合语音）</span><textarea id="st-live-text" rows="3" placeholder="输入台词…"></textarea></label>
-        <label class="st-field"><span>动作（可选）</span><select id="st-live-action"></select></label>
-        <div class="st-live-src">
-            <div class="st-live-src-title">语音来源</div>
-            <div class="st-live-tabs">
-                <button type="button" data-src="file" class="is-active">选择音频</button>
-                <button type="button" data-src="list">音频列表</button>
-                <button type="button" data-src="tts">文字合成</button>
-            </div>
-            <div data-src-pane="file">
-                <div class="st-file-row">
-                    <label class="st-file-btn" for="st-live-file">选择文件</label>
-                    <span id="st-live-file-name" class="st-file-name">未选择文件</span>
-                </div>
-                <input type="file" id="st-live-file" accept="audio/*">
-                <div id="st-live-import-msg" class="st-live-note">音频仅在本地播放，不会上传或保存到服务器。</div>
-            </div>
-            <div data-src-pane="list" hidden>
-                <label class="st-field"><span>文件夹（character/sounds/）</span><select id="st-live-sound-folder"></select></label>
-                <label class="st-field"><span>音频文件</span><select id="st-live-sound-file"></select></label>
-                <div class="st-live-note">播放 character/sounds/ 下已有的音频，不上传、不落盘。</div>
-            </div>
-            <div data-src-pane="tts" hidden>
-                <div class="st-live-note">需服务端配置 TTS 引擎（EMOTE_TTS_BIN）；未配置时会提示改用选择音频。</div>
-            </div>
-        </div>
-        <div class="st-live-ops">
-            <button type="button" id="st-live-say" class="is-primary">开口说话</button>
-            <button type="button" id="st-live-stop">停止</button>
-        </div>
-        <div id="st-live-msg" class="st-live-note"></div>
-    </section>
+    <!-- 系统菜单：独立于 HUD 的全屏覆盖层，按完整 1920×1080 画面等比居中，
+         不受 HUD "800 基准贴底" 的裁切影响（非全屏窗口下菜单顶部曾被切掉）。图层由 menu.js 注入。 -->
+    <div id="st-sysmenu" aria-hidden="true"></div>
+
+    <!-- 即时台词 LIVE 已迁到研究所页（../stage/index.html），此处不再保留入口。 -->
 
     <!-- ============================================================
          编辑态工作台（四区布局）
@@ -161,6 +118,8 @@
             </div>
             <span class="wb-spacer"></span>
             <button type="button" id="wb-issue-badge" class="wb-issue-badge" title="展开问题面板">✓ 0</button>
+            <span id="st-msg"></span>
+            <span id="st-progress"></span>
             <span class="st-file-name" id="st-json-name"></span>
             <button type="button" id="st-add-line" title="在选中行后新增一行">＋ 新增行</button>
             <button type="button" id="st-save" disabled title="保存场景（Ctrl+S）">保存</button>

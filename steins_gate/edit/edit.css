@@ -120,6 +120,15 @@
 .wb-nav-scene-group .wb-project-title input { flex: 1 1 auto; min-width: 0; }
 .wb-nav-scene-group .wb-project-title input { width: 100%; }
 .wb-field-label { flex: 0 0 34px; font-size: var(--fs-xs); color: var(--text-3); }
+/* 日历子窗口：月/日/星期/通知四项横排，窄栏内平均分配 */
+/* 日历抽屉：与其他本行演出抽屉同款，边框/间距交给抽屉样式统一处理。 */
+.st-subwin-props { padding: 0; border-top: 0; }
+.st-subwin-props .wb-nav-group-title { display: flex; align-items: baseline; gap: 6px; }
+.st-subwin-props .st-field-note { font-size: var(--fs-xs); color: var(--text-4); }
+.st-subwin-row { display: flex; gap: 6px; }
+.st-subwin-row .st-field { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.st-subwin-row .st-field > span { font-size: var(--fs-xs); color: var(--text-3); }
+.st-subwin-row input, .st-subwin-row select { width: 100%; min-width: 0; }
 /* 资源抽屉分组标题：与项目区分开，弱色小字 */
 .wb-res-group-title {
     display: flex; align-items: baseline; gap: 6px;

@@ -56,7 +56,6 @@
     var clearBgmSel = ST.clearBgmSel;
     var clearTimers = ST.clearTimers;
     var cloneStage = ST.cloneStage;
-    var closeLive = ST.closeLive;
     var cueOf = ST.cueOf;
     var cueRoles = ST.cueRoles;
     var currentLine = ST.currentLine;
@@ -96,7 +95,6 @@
     var putJson = ST.putJson;
     var reassignRoleInScript = ST.reassignRoleInScript;
     var rebuildStaging = ST.rebuildStaging;
-    var refreshLiveRoles = ST.refreshLiveRoles;
     var renderBgmDetail = ST.renderBgmDetail;
     var renderBgmTrack = ST.renderBgmTrack;
     var renderLine = ST.renderLine;
@@ -914,6 +912,10 @@
             shellDrawer({ key: 'voice', group: 'insp', head: subs[0], nodes: collectAfter(subs[0], 'st-sub') });
             shellDrawer({ key: 'stage', group: 'insp', head: subs[1], nodes: collectAfter(subs[1], 'st-sub') });
         }
+        // 日历抽屉注册在最后：台词 / 角色语音库 / 登台角色 / 日历。
+        var cal = propsSec.querySelector('.st-subwin-props');
+        if (cal) wrapDrawer({ key: 'calendar', group: 'insp', el: cal,
+            head: cal.querySelector('.wb-linebar-head') });
         loadDrawerState();
     }
 
@@ -1078,7 +1080,6 @@
         state.stage = cloneStage(state.baseStage);
         syncLayout();
         renderEditor();
-        refreshLiveRoles();
     }
     function wbUndo() {
         wbFlushHistory();   // 未提交的改动先落帧，才能一步撤回到改动前
@@ -3202,6 +3203,14 @@
     function renderProps() {
         if (!state.scene) return;
         setVal($('st-title'), state.scene.title || '');
+        // 日历是本行演出：读本句生效值（字段级沿用上一句），写也写回本句
+        var sw = ST.subwinAt ? ST.subwinAt(state.sel) : (state.scene.subwin || {});
+        var swVal = function (id, v) { var el = $(id); if (el) setVal(el, v); };
+        swVal('sw-month', sw.month == null ? '' : sw.month);
+        swVal('sw-day', sw.day == null ? '' : sw.day);
+        swVal('sw-week', sw.week == null ? '' : sw.week);
+        swVal('sw-notify', sw.notify || 'none');
+        ST.setSubwin(sw);
         syncBgCurrent();
 
         var line = lines()[state.sel];
@@ -3423,6 +3432,8 @@
        可见部分是自定义下拉，深色主题下可读，并显示文件名副信息。 */
     function syncScenePicker() {
         var sel = $('st-scene'), menu = $('st-scene-menu'), label = $('st-scene-label');
+        /* 剧情页顶栏已移除；剧本选择改由 SYSTEM → OBSERVER 面板承担。 */
+        if (!menu || !label) return;
         var s = state.scenes.filter(function (x) { return x.file === state.file; })[0];
         label.textContent = s ? s.title : (state.file || '选择场景');
         [].forEach.call(menu.children, function (item) {
@@ -3432,6 +3443,7 @@
     }
     function openSceneMenu(open) {
         var picker = $('st-scene-picker'), menu = $('st-scene-menu'), trig = $('st-scene-trigger');
+        if (!picker || !menu || !trig) return;
         picker.classList.toggle('is-open', open);
         trig.setAttribute('aria-expanded', open ? 'true' : 'false');
         menu.hidden = !open;
@@ -3442,15 +3454,15 @@
     }
     function setSceneActive(item) {
         var menu = $('st-scene-menu');
+        if (!menu) return;
         [].forEach.call(menu.children, function (x) { x.classList.remove('is-active'); });
         if (item) { item.classList.add('is-active'); item.scrollIntoView({ block: 'nearest' }); }
     }
     function pickScene(file) {
         openSceneMenu(false);
         if (!file || file === state.file) return;
-        var sel = $('st-scene');
-        sel.value = file;
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        /* 顶栏 select 可能已不存在，直接走同一条切换路径。 */
+        switchScene(file);
     }
     document.addEventListener('click', function (evt) {
         var trig = evt.target.closest && evt.target.closest('#st-scene-trigger');
@@ -3540,7 +3552,6 @@
                 // 编辑页换场＝转去编新剧本：回到「剧本」视图、选中首行
                 if (EDIT_PAGE) { state.sel = 0; setTab('script'); renderEditor(); }
             }
-            refreshLiveRoles();  // 角色下拉随登场阵容变化（不重复绑定事件）
             msg('已切换到 ' + file + '（' + stage.length + ' 人登场）');
         } catch (err) {
             msg('切换失败：' + err.message);
@@ -3818,6 +3829,21 @@
             if (!state.scene) return;
             state.scene.title = this.value;
             markStale();
+        });
+        [['sw-month','month'], ['sw-day','day'], ['sw-week','week'], ['sw-notify','notify']].forEach(function (pair) {
+            var el = $(pair[0]);
+            if (!el) return;
+            el.addEventListener('input', function () {
+                var line = lines()[state.sel];
+                if (!line) return;
+                var sw = line.subwin || (line.subwin = {});
+                var v = this.value;
+                if (v === '' || v == null) delete sw[pair[1]];
+                else sw[pair[1]] = pair[1] === 'notify' ? v : Number(v);
+                if (!Object.keys(sw).length) delete line.subwin;
+                ST.setSubwin(ST.subwinAt ? ST.subwinAt(state.sel) : sw);
+                markStale();
+            });
         });
         $('st-bg-search').addEventListener('input', filterBgGallery);
         $('st-bg-search').addEventListener('keydown', function (evt) {
@@ -4441,14 +4467,25 @@
             setAuto(!state.autoOn);
             return;
         }
+        // SYSTEM / SKIP / PHONE 暂未接功能：先做成可点——给一帧原作橙字反馈，
+        // 同样不当成「点了一下画面」去推进剧本。
+        var pcbtTag = target.closest && target.closest('#st-pcbt .pcbt');
+        if (pcbtTag) {
+            evt.stopPropagation();
+            pcbtTag.classList.add('is-pressed');
+            if (pcbtTag.__pressTimer) clearTimeout(pcbtTag.__pressTimer);
+            pcbtTag.__pressTimer = setTimeout(function () {
+                pcbtTag.classList.remove('is-pressed');
+                pcbtTag.__pressTimer = null;
+            }, 280);
+            return;
+        }
         // 即时台词面板内的点击交给面板自己处理，不推进剧本
-        if (target.closest && target.closest('#st-live')) return;
         // 角色卡（含绑定展开、存为宏）自己处理点击，别落到剧本行的删除/移动上
         if (target.closest && target.closest('#st-stage-list')) return;
         // 角色表页内的点击交给它自己的委托处理，不落到剧本行操作
         if (target.closest && target.closest('#st-view-cast')) return;
         if (state.mode !== 'edit') {
-            if (state.liveOpen) return;      // 即时台词打开时冻结剧本推进
             if (target.closest && target.closest('#st-bar')) return;
             step();
             return;
@@ -4486,9 +4523,10 @@
     });
 
     document.addEventListener('keydown', function (evt) {
-        if (state.mode !== 'play' || state.liveOpen) return;
-        // 场景下拉展开时由它自己处理方向键/回车，别当播放快捷键
-        if (!($('st-scene-menu') || {}).hidden) return;
+        if (state.mode !== 'play') return;
+        // 场景下拉展开时由它自己处理方向键/回车；顶栏已移除时不影响播放快捷键
+        var sceneMenu = $('st-scene-menu');
+        if (sceneMenu && !sceneMenu.hidden) return;
         // 正在文本框/面板/下拉按钮里输入时不劫持按键
         if (evt.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(evt.target.tagName) ||
             (evt.target.closest && evt.target.closest('#st-scene-picker')))) return;

@@ -1,24 +1,27 @@
 /* sg-dialog.js —— 剧情模式的对话框，用从 main.psb.m 拆出的 MSGWIN / name 还原
  *
- *  素材：游戏的对话框层，全部按原矩形切出、无损转 webp：
- *          1_lines 白色电路线（線のみ / 線のみ反転 两次擦除用的同一张）
- *          2_grad  灰渐变窗底（ベースグラデ 下的 ウィンドウ）
- *          3_dark  深色窗芯（中间那块黑色区域）
- *          4_dim   暗灰电路线（常态留在窗口上的装饰）
- *          5_mid   中间调电路线（白线转灰的过渡）
+ *  素材：游戏的对话框层，按原矩形切出后竖排合成无损精灵图：
+ *          ui/msgwin_sheet.webp（1920×2030，帧高 290）
+ *            帧0 win=灰渐变窗底 / 帧1 lines=白色电路线 / 帧2 dark / 帧3 dim / 帧4 mid
+ *            帧5·6 为历史帧（msgwin / msgwin_lines），保留但不参与画面
+ *          ui/deco_sheet.webp（1053×168，帧高 56）
+ *            帧0 暗态装饰线 / 帧1 亮态装饰线 / 帧2 namedeco（备用帧，不参与当前播放）
+ *          ui/nameplate_morph.webp（650×10140，帧高 65）
+ *            4 档 × 39 帧：0..38 帧是名牌白闪展开，按 60fps 采样 wrt 1.0→0.01
+ *            这条连续曲线（原作 30fps 只采了 20 帧），每帧都来自 #mask/2..5 的真实阈值。
+ *            档位按行排列：s / m / l / ll（每行 39 帧 × 65px）。
  *
  *  数据来源：main.psb 的 MSGWIN.show（88 帧）/ deco_show（30 帧）与 name.wipe_*（30 帧）
  *   开屏是三段【串行】动画，PSB 里靠 t=59 的子运动触发串起来：
  *   ① MSGWIN.show 0–59 帧：白线两侧擦入（0–29）、反向擦出（30–59）；窗底渐变 0–59 擦入。
  *      t=59 同时触发 deco_show / name_on / state —— 所以装饰线和名牌都在对话框铺好之后才动。
- *   ② MSGWIN.deco_show 0–29 帧：装饰线白亮层（名前飾りwhite = deco_lit）以 #mask/6
+ *   ② MSGWIN.deco_show 0–29 帧：装饰线白亮层（deco_sheet 帧1 = deco_lit）以 #mask/6
  *      （tex#000 0353，1049×52，originX=525 正中）从【中间向两边】擦入亮起（wrt 1→0，0–19 帧）；
- *      暗态底图（名前飾り = deco_dim）t=19 出现；白亮层 t=19–29 淡出 opa→0，恢复暗态常亮。
+ *      暗态底图（deco_sheet 帧0 = deco_dim）t=19 出现；白亮层 t=19–29 淡出 opa→0，恢复暗态常亮。
  *      这就是「亮起→恢复」那一下。→ AUTO 打开后另有循环「充能」：上排左→右扫、下排中心→两侧展开。
- *   ③ name 20 帧：名牌底板走 mesh 形变 —— 正菱形→横向纺锤→六边形（纯白形变层展开，
- *                    末段淡出交接给带网点纹理的正式底板，文字随后浮现）。截图实测三态：
- *                    菱形≈终态 1/7 宽、四角皆尖；纺锤左右拉到全宽、上下仍尖；
- *                    六边形顶边展开到约 82%、左右斜切 19px（正是底板素材轮廓）。
+ *   ③ name.wipe_*_show 30 帧：原作是白闪层 名前窓white 被 #mask/2..5 按 stc.wrt
+ *                    从 1.0→0.01 阈值擦除（t=0..19），菱形→横向纺锤→六边形；
+ *                    t=19 底板与名字文字就位，白闪层 t=19..29 淡出把它们露出来。
  *
  *  坐标系：一律 1920×1080，跟游戏的 UI 画布一致；整层按视口缩放居中，
  *          #st-hud 上挂 transform，内部元素全部写绝对像素。
@@ -44,6 +47,13 @@
     var MEASURE_PX = 240;             // 量字体度量用的字号：够大，按比例缩回小字号时误差 < 0.05px
     var PLATE_H = 59;                 // 底板素材高度（四档一样）
     var PLATE_MID = 25.5;
+    var WHITE_W = { s: 230, m: 370, l: 475, ll: 650 }; // 白闪素材宽度（JSON tex#000 0051 / tex#001 0054 / tex#000 0052 / 0053）
+    var WHITE_TOP = PLATE_TOP - 3;    // 白闪 65 高、底板 59 高，两者中心重合
+    /* name.wipe_*_show：lastTime=30（30fps）。擦入 wrt 1.0→0.01 是连续参数，
+       原作只采 20 帧；这里按 60fps 采 39 帧，时长仍是 19/30s。
+       白闪淡出 t=19..29 = 0.333s，60fps 下占 20 帧。整段 1 秒 = 60 帧。 */
+    var MORPH = { total: 60, frames: 39, cell: 65, sheetW: 650, ms: 1000,
+                  wipeEnd: 38, fadeEnd: 58, row: { s: 0, m: 1, l: 2, ll: 3 } };
     var NAME_FAMILY = '"Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif';
     var NAME_WEIGHT = 500;
 
@@ -55,7 +65,6 @@
 
     /* 装饰线跑马灯：底图 1053×56 常亮，上面再叠一份提亮副本，
        靠 CSS 的 mask 光带 + animation 从左往右无限扫（周期 1.5s，见 index.html 的 sg-sweep）。 */
-    var DECO_W = 1053, DECO_H = 56;
 
     function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
     function $(id) { return document.getElementById(id); }
@@ -144,26 +153,23 @@
     /* ---------- 装饰线跑马灯 ---------- */
 
     /* 装饰线只搭一次骨架：暗态底图（AUTO 关闭时的常态）+ 两层高亮。
-       亮/暗两态是两张烘焙好的图（deco_lit / deco_dim），不再用 filter 硬提亮。
+       亮/暗两态是同一张竖排精灵图 deco_sheet.webp 的前两帧（y=0 暗 / y=-56 亮），
+       不再用 filter 硬提亮；取帧只改 background-position 的 Y。
        这 1053×56 的图里其实是两个件，动画规律不一样，必须拆开：
          上排主图案 —— 一条竖直硬边前沿从左扫到右、再扫一次收走（.deco-lit，CSS 里带 mask 动画）；
          下排居中短线 —— 从中间往两头张开再收回（.deco-chg，左右两片用 clip-path 推）。
        并且只有 .hud-deco.is-auto 时才 display，AUTO 关掉就纯静态、零动画开销。 */
     function buildDeco() {
         if (!el.deco || el.decoLit) return;
-        var dimSrc = opt.base + 'deco_dim.webp';
-        var litSrc = opt.base + 'deco_lit.webp';
-        var base = document.createElement('img');
+        var sheetSrc = opt.base + 'deco_sheet.webp';
+        var base = document.createElement('div');
         base.className = 'deco-base';
-        base.src = dimSrc;
-        base.alt = '';
-        base.width = DECO_W; base.height = DECO_H;
         el.deco.appendChild(base);
 
         var wrap = document.createElement('div');
         wrap.className = 'deco-lit';
         var inner = document.createElement('i');
-        inner.style.backgroundImage = 'url("' + litSrc + '")';
+        inner.style.backgroundImage = 'url("' + sheetSrc + '")';
         wrap.appendChild(inner);
         el.deco.appendChild(wrap);
 
@@ -174,7 +180,7 @@
         var halves = ['chg-l', 'chg-r'].map(function (cls) {
             var s = document.createElement('span');
             s.className = cls;
-            s.style.backgroundImage = 'url("' + litSrc + '")';
+            s.style.backgroundImage = 'url("' + sheetSrc + '")';
             chg.appendChild(s);
             return s;
         });
@@ -184,7 +190,7 @@
            对话框铺好后，白亮图从正中向两边擦入亮起、再淡出恢复暗态底图，只播一次。 */
         var intro = document.createElement('div');
         intro.className = 'deco-intro';
-        intro.style.backgroundImage = 'url("' + litSrc + '")';
+        intro.style.backgroundImage = 'url("' + sheetSrc + '")';
         el.deco.appendChild(intro);
 
         el.decoBase = base;
@@ -195,7 +201,7 @@
 
     /* 开屏装饰线亮起（对应 MSGWIN.deco_show，30 帧 = 1s）：
        0–19 帧白亮层以 #mask/6 从中间向两边擦入；19–29 帧白亮淡出、
-       露出一直在底下的暗态 deco_dim —— 即「亮起→恢复」。此后暗态常亮，
+       露出一直在底下的暗态帧（deco_sheet y=0）—— 即「亮起→恢复」。此后暗态常亮，
        AUTO 的循环扫光另走 .deco-lit/.deco-chg，两者不打架。
        动画期间临时关掉 is-auto，免得 AUTO 的 CSS 扫光叠在这一下上头。 */
     var DECO_LIT_END = 19 / 30;
@@ -247,8 +253,8 @@
 
     /* 窗口开场 —— 严格照 PSB 的 MSGWIN.show（main.psb.m.json 实测）复现：
        可见贴图只有 2 张（sourceIconRenameMap 铁证）：
-         main/white     → tex#000 icon 0008 = msgwin_1_lines.webp（白电路线）
-         main/ウィンドウ → tex#000 icon 0009 = msgwin_2_grad.webp（灰渐变窗底）
+         main/white     → tex#000 icon 0008 = msgwin_sheet 帧1（白电路线）
+         main/ウィンドウ → tex#000 icon 0009 = msgwin_sheet 帧0（灰渐变窗底）
        而 0348/0355/0356（旧代码当"深色窗芯/暗灰线/中间调线"叠上去的）= #mask/1/#mask/8/#mask/9，
        是 e-mote 的内置擦除遮罩图案，show 根本没把它们当可见层 —— 旧代码把遮罩当贴图叠，是错的。
 
@@ -286,56 +292,44 @@
         if (el.hud) el.hud.classList.toggle('is-open', t > 58);
     }
 
-    /* ---------- 名牌 mesh 形变：菱形 → 横向纺锤 → 六边形 ----------
-       素材实测轮廓（s 档 226×59 盒，四档同比）：中腰 y≈25.5、x=2..W-2；
-       顶边 y=6、x=21..W-21；底边 y=45、x=23..W-23。
-       截图三态：菱形宽≈19高≈20（四角皆尖、近正方）；纺锤顶边仅 13px、左右拉满；
-       六边形顶边≈82%（正是素材）。
-       6 顶点统一为「左上、右上、右中、右下、左下、左中」顺时针六点，三段插值，
-       中间给纺锤一个停留段（原作录像里它是独立存在的中间帧，不该一闪而过）：
-         0→0.45    拉宽：菱形→纺锤（左右尖从中心拉到 x=2..W-2，上下短边仍窄）
-         0.45→0.60 纺锤停留
-         0.60→1    压平：纺锤→六边形（上下短边展开到素材的 21px）
-       菱形/纺锤的上下边收缩成尖点时，相邻两点重合，得到真菱形。
-       终态六边形与底板素材轮廓重合，末段交接无跳变。 */
-    var MORPH_WIDEN = 0.45, MORPH_HOLD = 0.60;
-    function lerp(a, b, t) { return a + (b - a) * t; }
-    function morphPolygon(v, W) {
-        var cx = W / 2, mid = 25.5;
-        var r0 = 16;     // 菱形水平半宽（截图≈19/2，近正方）
-        var narrow = 7;  // 纺锤上下短边半宽（截图顶边 13px 的一半）
-        // 六点：左上、右上、右中、右下、左下、左中
-        var k0 = [[cx, 9.5], [cx, 9.5], [cx + r0, mid],
-                  [cx, 41.5], [cx, 41.5], [cx - r0, mid]];
-        var k1 = [[cx - narrow, 10], [cx + narrow, 10], [W - 2, mid],
-                  [cx + narrow, 41], [cx - narrow, 41], [2, mid]];
-        var k2 = [[21, 6], [W - 21, 6], [W - 2, mid],
-                  [W - 23, 45], [23, 45], [2, mid]];
-        var from, to, t;
-        if (v <= MORPH_WIDEN) { from = k0; to = k1; t = clamp01(v / MORPH_WIDEN); }
-        else if (v <= MORPH_HOLD) { from = k1; to = k1; t = 0; }
-        else { from = k1; to = k2; t = clamp01((v - MORPH_HOLD) / (1 - MORPH_HOLD)); }
-        var pts = [];
-        for (var i = 0; i < 6; i++) {
-            pts.push(lerp(from[i][0], to[i][0], t).toFixed(1) + 'px ' + lerp(from[i][1], to[i][1], t).toFixed(1) + 'px');
-        }
-        return 'polygon(' + pts.join(',') + ')';
+    /* ---------- 名牌白闪：原作遮罩的真实阈值帧 ----------
+       name.wipe_S/L/M/LL_show 的可见层是整块白色 名前窓white，上面盖 #mask/5..2；
+       stc.wrt 从 t=0 的 1.0 线性降到 t=19 的 0.01，遮罩 alpha 超过阈值的部分被擦掉。
+       把每帧阈值结果烘焙进 nameplate_morph.webp（白色图形，透明背景）后，
+       这里只按档位/帧号改 background-position，边界直接来自原作遮罩纹理。
+       不用 CSS mask：逐帧改遮罩会让浏览器重绘整张大图（实测 80–150ms/帧），明显卡顿。 */
+    function morphFrame(size, frame) {
+        if (!el.nameMorph) return;
+        var f = Math.max(0, Math.min(MORPH.frames - 1, frame | 0));
+        var y = (MORPH.row[size] * MORPH.frames + f) * MORPH.cell;
+        var pos = y === 0 ? '0px 0px' : '0px -' + y + 'px';
+        el.nameMorph.style.backgroundPosition = pos;
     }
 
-    /* 名牌底板 + mesh 形变：形变层在前 84% 从菱形展开到六边形（纯白），
-       末段 84%→100% 形变层淡出、正式底板淡入（两者六边形轮廓重合），文字随后浮现。 */
+    /* 名牌底板 + 白闪交接：60fps 的前 38 帧白闪按原遮罩展开（底板/文字全隐）；
+       第 38 帧底板与文字就位（藏在白闪下面）；38–58 帧白闪淡出把它们露出来。
+       时间点与 JSON 的 t=19/29（30fps）完全一致，只是采样率翻倍。 */
     function paintPlate(v) {
         st.plate = clamp01(v);
         var p = st.plate;
-        var W = st.plateW || PLATE.s;
-        if (el.nameMorph) {
-            el.nameMorph.style.clipPath = morphPolygon(clamp01(p / 0.84), W);
-            el.nameMorph.style.webkitClipPath = el.nameMorph.style.clipPath;
-            el.nameMorph.style.opacity = String(1 - clamp01((p - 0.84) / 0.16));
-            el.nameMorph.style.visibility = p <= 0.001 ? 'hidden' : 'visible';
+        var t = p * MORPH.total;
+        var size = st.plateSize || 's';
+        if (t < MORPH.wipeEnd) {
+            var f = Math.min(MORPH.frames - 1, Math.floor(t));
+            morphFrame(size, f);
+            fadeLayer(el.nameMorph, f <= 0 ? 0 : 1);
+            fadeLayer(el.name, 0);
+            if (el.nameText) fadeLayer(el.nameText, 0);
+        } else if (t < MORPH.fadeEnd) {
+            morphFrame(size, MORPH.frames - 1);
+            fadeLayer(el.nameMorph, 1 - (t - MORPH.wipeEnd) / (MORPH.fadeEnd - MORPH.wipeEnd));
+            fadeLayer(el.name, 1);
+            if (el.nameText) fadeLayer(el.nameText, 1);
+        } else {
+            fadeLayer(el.nameMorph, 0);
+            fadeLayer(el.name, 1);
+            if (el.nameText) fadeLayer(el.nameText, 1);
         }
-        fadeLayer(el.name, clamp01((p - 0.84) / 0.16));
-        if (el.nameText) el.nameText.style.opacity = String(clamp01((p - 0.7) / 0.3));
         if (el.nameWhite) el.nameWhite.style.opacity = '0';
     }
 
@@ -385,7 +379,8 @@
     function layoutPlate(spec) {
         var left = PLATE_CX - spec.width / 2;
         st.plateW = spec.width;
-        [el.name, el.nameWhite, el.nameMorph].forEach(function (n) {
+        st.plateSize = spec.size;
+        [el.name, el.nameWhite].forEach(function (n) {
             if (!n) return;
             n.style.left = left + 'px';
             n.style.width = spec.width + 'px';
@@ -393,6 +388,17 @@
             n.style.backgroundPosition = (-PLATE_X[spec.size]) + 'px 0';   // 雪碧图按档位取片
             n.__wipeW = 0;                  // 宽度换档了：让 wipe 下次重新量一次
         });
+        /* 白闪层尺寸取自 white 素材（比底板宽/高几像素），中心与底板对齐；
+           取帧行按档位，帧号由 paintPlate 按 wrt 进度驱动。 */
+        if (el.nameMorph) {
+            var ww = WHITE_W[spec.size];
+            el.nameMorph.style.left = (PLATE_CX - ww / 2) + 'px';
+            el.nameMorph.style.width = ww + 'px';
+            el.nameMorph.style.top = WHITE_TOP + 'px';
+            /* 字体异步就绪时会二次 layoutPlate：此时开场擦入可能正在播。
+               直接用当前进度重画一次，避免换档/重摆把白闪帧写回旧值（实测会回退几帧）。 */
+            paintPlate(st.plate);
+        }
         /* 文字盒 = 整块底板：水平居中交给 flex，位置就恒等于底板中心 */
         el.nameText.style.left = left + 'px';
         el.nameText.style.width = spec.width + 'px';
@@ -462,7 +468,7 @@
         if (changed) {
             st.decoRun = true;
             paintPlate(0);
-            run(0, 1, (20 / FPS) * 1000 / opt.speed, paintPlate);
+            run(0, 1, MORPH.ms / opt.speed, paintPlate);
         } else {
             paintPlate(1);
         }
@@ -604,7 +610,8 @@
         /* 开屏三段串行，照 main.psb.m 的 show → deco_show → name 触发顺序：
            ① 0–59 铺对话框（窗底擦入 + 白线擦入擦出）
            ② deco_show 30 帧：装饰线从中间向两边亮起再恢复暗态
-           ③ name 20 帧：名牌 mesh 形变（菱形→纺锤→六边形）
+           ③ name.wipe_*_show 30 帧：白闪按原作 #mask 阈值帧展开（菱形→纺锤→六边形）
+             0–19 帧擦入、19–29 帧淡出交接底板与文字
            done 在名牌就位后才回调，剧情首句的打字/语音此时才启动。 */
         open: function (done) {
             st.open = 0; st.ready = false;
@@ -627,7 +634,7 @@
                         if (done) done();
                         return;
                     }
-                    run(0, 1, (20 / FPS) * 1000 / opt.speed, paintPlate, function () {
+                    run(0, 1, MORPH.ms / opt.speed, paintPlate, function () {
                         st.introMarks.push({ phase: 'done', t: performance.now() });
                         st.ready = true;
                         if (done) done();
@@ -637,7 +644,7 @@
         },
         close: function (done) {
             /* 反向收起：名牌先灭、装饰线再灭，最后对话框擦出；次序与开屏相反。 */
-            run(1, 0, (20 / FPS) * 1000 / opt.speed, function (v) {
+            run(1, 0, MORPH.ms / opt.speed, function (v) {
                 paintPlate(v);
                 if (el.deco) el.deco.style.opacity = String(v);
             }, function () {
@@ -660,13 +667,15 @@
             paintPlate(clamp01((t - 39) / 20));
             if (el.deco) el.deco.style.opacity = String(clamp01((t - 50) / 8));
         },
-        showName: function () { run(st.plate, 1, (20 / FPS) * 1000, paintPlate); },
-        hideName: function () { run(st.plate, 0, (20 / FPS) * 1000, paintPlate); },
+        showName: function () { run(st.plate, 1, MORPH.ms, paintPlate); },
+        hideName: function () { run(st.plate, 0, MORPH.ms, paintPlate); },
         setCaret: setCaret,
         setGear: setGear,
         /* 调试/验收：直接摆开屏第②段的装饰线帧（0–1），读中间亮带与白亮层形态。
            不影响正常播放，也不改 st.ready/isOpen。 */
         setDecoShow: function (v) { paintDecoShow(Math.max(0, Math.min(1, v))); },
+        /* 调试/验收：直接摆名牌展开进度 0–1（30 帧制），不影响正常播放状态 */
+        setPlate: function (v) { paintPlate(Math.max(0, Math.min(1, v))); },
         introMarks: function () { return st.introMarks.slice(); },
         setSpeed: function (v) { opt.speed = v > 0 ? v : 1; },
         options: opt,

@@ -164,6 +164,10 @@
 
     <!-- 场景控制条：主页槽位 + 角色 tab + ⇅ 排序 / 切换背景 / ▲ 隐藏（纯 UI，不参与渲染） -->
     <script src="scene_ui.js"></script>
+
+    <!-- 即时台词 LIVE：左缘竖排拉手 + 面板 + 台词条，CSS 独立于 scene_ui 的注入样式 -->
+    <link rel="stylesheet" href="live.css">
+    <script src="live.js"></script>
 </head>
 
 <!-- wasm 异步就绪后由 EmoteDriver_Launch 调用 start() -->

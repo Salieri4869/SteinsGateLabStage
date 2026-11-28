@@ -1,0 +1,139 @@
+/* 即时台词 LIVE（研究所页）。
+   拉手贴舞台左缘中部，面板从左向右展开；台词条落在控制条上方、与面板左对齐。
+   配色沿用研究所的琥珀金（与「← 主页」同一套），不使用 story 页的原作 UI 资产。 */
+#sg-live-dock {
+    position: fixed; left: 0; top: 50%; transform: translateY(-50%);
+    z-index: 120; padding: 14px 7px;
+    writing-mode: vertical-rl; text-orientation: mixed;
+    font: 600 15px/1.2 "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
+    letter-spacing: 3px;
+    color: #f0d9ac; background: #191a17;
+    border: 1px solid rgba(233, 185, 110, .42); border-left: 0;
+    border-radius: 0 6px 6px 0; cursor: pointer;
+    box-shadow: 3px 0 16px rgba(0, 0, 0, .45);
+    transition: background .16s, border-color .16s, color .16s;
+}
+#sg-live-dock span {
+    margin-top: 10px; font: 500 10px/1 ui-monospace, Consolas, monospace;
+    letter-spacing: 2px; color: #c9a76e;
+}
+#sg-live-dock:hover { background: #2a251b; border-color: #e9b96e; }
+#sg-live-dock.is-active { background: #3a3020; border-color: #ffd08a; color: #ffe7bd; }
+#sg-live-dock.is-active span { color: #ffd08a; }
+#sg-live-dock:focus-visible { outline: 2px solid #e9b96e; outline-offset: -3px; }
+
+#sg-live-panel {
+    position: fixed; left: 40px; top: 50%; transform: translateY(-50%);
+    z-index: 121; width: 344px; max-height: calc(100vh - 96px); overflow-y: auto;
+    padding: 16px 17px 18px;
+    background: rgba(10, 13, 15, .97);
+    border: 1px solid rgba(233, 185, 110, .38); border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .6);
+    font: 13px/1.5 "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
+    color: #e6ecef;
+}
+#sg-live-panel[hidden] { display: none; }
+#sg-live-panel .sg-live-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 10px; margin-bottom: 14px;
+    border-bottom: 1px solid rgba(233, 185, 110, .28);
+}
+#sg-live-panel .sg-live-head h2 {
+    margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .08em; color: #f0d9ac;
+}
+#sg-live-panel .sg-live-head small {
+    margin-left: 6px; font: 500 10px/1 ui-monospace, Consolas, monospace;
+    letter-spacing: .14em; color: #c9a76e;
+}
+#sg-live-close {
+    width: 26px; height: 26px; padding: 0; border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 4px; background: transparent; color: #d6dee2;
+    font-size: 17px; line-height: 1; cursor: pointer;
+}
+#sg-live-close:hover { color: #10151a; background: #e9b96e; border-color: #e9b96e; }
+
+#sg-live-panel .sg-live-field { display: block; margin-bottom: 12px; }
+#sg-live-panel .sg-live-field > span {
+    display: block; margin-bottom: 6px; font-size: 11px; letter-spacing: .06em; color: #a9b4b8;
+}
+#sg-live-role {
+    display: flex; align-items: center; min-height: 34px; padding: 0 11px;
+    border: 1px solid rgba(255, 255, 255, .14); border-radius: 4px;
+    background: rgba(255, 255, 255, .045); color: #f0d9ac;
+}
+#sg-live-role small { margin-left: auto; color: #84969b; font-size: 10px; }
+#sg-live-panel textarea, #sg-live-panel select {
+    width: 100%; box-sizing: border-box; padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, .16); border-radius: 4px;
+    background: rgba(255, 255, 255, .05); color: #e6ecef;
+    font: inherit; resize: vertical;
+}
+#sg-live-panel select { height: 34px; padding: 0 8px; }
+#sg-live-panel textarea:focus, #sg-live-panel select:focus {
+    outline: none; border-color: rgba(233, 185, 110, .65);
+}
+
+#sg-live-file { display: none; }
+.sg-live-file-row { display: flex; align-items: center; gap: 8px; }
+.sg-live-file-btn {
+    flex: none; padding: 6px 11px; border: 1px solid rgba(233, 185, 110, .5);
+    border-radius: 4px; color: #f0d9ac; background: rgba(233, 185, 110, .1); cursor: pointer;
+}
+.sg-live-file-btn:hover { background: rgba(233, 185, 110, .2); }
+.sg-live-file-name {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 11px; color: #93a2a7;
+}
+.sg-live-file-name.has-file { color: #d8e2e5; }
+.sg-live-src-title {
+    margin: 4px 0 7px; font-size: 11px; letter-spacing: .06em; color: #a9b4b8;
+}
+.sg-live-tabs { display: flex; gap: 6px; margin-bottom: 9px; }
+.sg-live-tabs button {
+    flex: 1; height: 28px; padding: 0; font: 11px/1 inherit;
+    border: 1px solid rgba(255, 255, 255, .16); border-radius: 4px;
+    background: rgba(255, 255, 255, .04); color: #b9c5c9; cursor: pointer;
+}
+.sg-live-tabs button.is-active {
+    border-color: rgba(233, 185, 110, .7); background: rgba(233, 185, 110, .2); color: #ffe7bd;
+}
+[data-sg-src-pane] > select { margin-bottom: 8px; }
+.sg-live-note { min-height: 16px; font-size: 11px; color: #93a2a7; }
+.sg-live-note.err { color: #ff9c8f; }
+.sg-live-ops { display: flex; gap: 8px; margin: 12px 0 8px; }
+.sg-live-ops button {
+    flex: 1; height: 34px; border-radius: 4px; cursor: pointer;
+    font: 600 13px/1 inherit; letter-spacing: .06em;
+    border: 1px solid rgba(255, 255, 255, .2);
+    background: rgba(255, 255, 255, .06); color: #d6dee2;
+}
+.sg-live-ops button.is-primary {
+    border-color: #e9b96e; background: #e9b96e; color: #10151a;
+}
+.sg-live-ops button:hover:not(:disabled) { filter: brightness(1.12); }
+.sg-live-ops button:disabled { opacity: .45; cursor: default; }
+
+/* 台词条：与 LIVE 面板左侧对齐，舞台下方、控制条上方，琥珀金细边 + 原作式斜切左端。 */
+#sg-live-bubble {
+    position: fixed; left: 40px; bottom: 88px;
+    z-index: 110; width: min(880px, calc(100vw - 80px)); min-height: 84px;
+    padding: 14px 24px 14px 30px;
+    background: linear-gradient(90deg, rgba(8, 12, 15, .94), rgba(12, 18, 22, .88));
+    border: 1px solid rgba(233, 185, 110, .42); border-left: 4px solid #e9b96e;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .5);
+    pointer-events: none;
+}
+#sg-live-bubble[hidden] { display: none; }
+#sg-live-bubble b {
+    display: block; margin-bottom: 7px; font-size: 14px; font-weight: 600;
+    letter-spacing: .1em; color: #f0d9ac;
+}
+#sg-live-bubble span {
+    display: block; font-size: 20px; line-height: 1.45; letter-spacing: .03em; color: #f2f6f7;
+    white-space: pre-wrap; word-break: break-all;
+}
+#sg-live-bubble.is-typing span::after {
+    content: ""; display: inline-block; width: 7px; height: 1em; margin-left: 3px;
+    vertical-align: -.12em; background: #e9b96e; animation: sg-live-caret .7s steps(1) infinite;
+}
+@keyframes sg-live-caret { 50% { opacity: 0; } }
